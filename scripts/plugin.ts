@@ -23,12 +23,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import qrcode from "qrcode-generator";
 
 import { DEFAULT_PORT } from "../shared/protocol.ts";
 import type { RemoteAccess } from "../shared/protocol.ts";
+import { conductorLaunch } from "./conductor-launch.ts";
 import { canBind, FALLBACK_PORTS, freePort, savedPort } from "./plugin-port.ts";
 import { activePluginScript } from "./plugin-runtime.ts";
 import { parseTailscale, parseTailscaleIp, parseTailscaleOwner, readTailscale, tailscaleBinary } from "../server/tailscale.ts";
@@ -570,6 +571,39 @@ async function phoneSetup(): Promise<number> {
   return code;
 }
 
+/**
+ * The Start conductor pane: an ordinary AI agent (HERDR_WEB_CONDUCTOR_CMD, Claude Code by default)
+ * in the conductor folder, with conductor/CONDUCTOR.md as its first message. It watches the panes and
+ * leaves suggestion cards; it can send nothing to a pane (scripts/conductor.ts has no such command).
+ */
+async function conductor(): Promise<number> {
+  const active = activePluginScript(ROOT, port, APP_STATE_DIR);
+  if (active !== join(resolve(ROOT), "scripts", "plugin.ts") && resolve(active) !== resolve(import.meta.filename)) {
+    const child = Bun.spawn([process.execPath, active, "conductor"], { cwd: ROOT, windowsHide: true, env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    return await child.exited;
+  }
+  const fail = async (message: string): Promise<number> => {
+    process.stderr.write(`${message}\n`);
+    if (process.stdin.isTTY) {
+      process.stdout.write("\nPress Enter to close this pane.\n");
+      await new Promise<void>((done) => { process.stdin.once("data", () => done()); process.stdin.resume(); });
+      process.stdin.pause();
+    }
+    return 1;
+  };
+  let launch: ReturnType<typeof conductorLaunch>;
+  try { launch = conductorLaunch(env, dirname(import.meta.dir), process.execPath); }
+  catch (error) { return await fail(`Could not start the conductor: ${error instanceof Error ? error.message : String(error)}`); }
+  const executable = Bun.which(launch.argv[0]!, { PATH: toolPath() });
+  if (executable === null) return await fail(`Could not start the conductor: "${launch.argv[0]}" is not on PATH. Install it, or set HERDR_WEB_CONDUCTOR_CMD in ${join(CONFIG_DIR, "env")}.`);
+  if (!(await health())) process.stdout.write(`The app is not answering at ${origin}; the conductor will say so until you run the Start herdr web ui action.\n`);
+  const child = Bun.spawn([executable, ...launch.argv.slice(1)], {
+    cwd: launch.cwd, windowsHide: true, stdin: "inherit", stdout: "inherit", stderr: "inherit",
+    env: { ...env, [PATH_KEY]: toolPath(), HERDR_WEB_URL: origin },
+  });
+  return await child.exited;
+}
+
 /** Reporting "down" is not an action failure: herdr logs a nonzero exit as failed. */
 async function status(): Promise<number> {
   const pid = recordedPid();
@@ -587,7 +621,8 @@ else if (command === "status") process.exit(await status());
 else if (command === "pair") process.exit(await pair());
 else if (command === "phone") process.exit(await phone());
 else if (command === "phone-setup") process.exit(await phoneSetup());
+else if (command === "conductor") process.exit(await conductor());
 else {
-  process.stderr.write(`usage: bun scripts/plugin.ts <start|stop|status|pair|phone|phone-setup>\n`);
+  process.stderr.write(`usage: bun scripts/plugin.ts <start|stop|status|pair|phone|phone-setup|conductor>\n`);
   process.exit(2);
 }

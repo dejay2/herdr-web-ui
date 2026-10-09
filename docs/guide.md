@@ -1,6 +1,6 @@
 # User guide
 
-[← README](../README.md) · [Quick start](#quick-start) · [Supported agents](#supported-agents) · [Features](#features) · [Phone](#on-your-phone) · [Remote PCs](#remote-pcs-over-ssh) · [Access and safety](#access-and-safety) · [Configuration](#configuration) · [Updates](#updates) · [Keyboard shortcuts](#keyboard-shortcuts) · [How it works](#how-it-works) · [FAQ](#faq)
+[← README](../README.md) · [Quick start](#quick-start) · [Supported agents](#supported-agents) · [Features](#features) · [Phone](#on-your-phone) · [Remote PCs](#remote-pcs-over-ssh) · [Conductor](#conductor-master-agent) · [Access and safety](#access-and-safety) · [Configuration](#configuration) · [Updates](#updates) · [Keyboard shortcuts](#keyboard-shortcuts) · [How it works](#how-it-works) · [FAQ](#faq)
 
 Install, connect and use herdr web ui on your desktop and phone.
 
@@ -293,6 +293,34 @@ Open Settings → Remote PCs and choose **Add PC** (the command palette has it t
 **From your Tailscale PCs:** if Tailscale runs on the web server's PC, the Add PC dialog lists the other PCs of your tailnet above the address field. Tap an online one to fill in its address and name (edit the address to add a `user@` if your login there differs), then Connect. A PC that is offline cannot be picked, and one already added shows **Added**. Tailscale SSH may print a sign-in link while connecting; the dialog makes it clickable.
 
 More in [remote PCs](remote-pcs.md).
+
+## Conductor (master agent)
+
+The conductor is one ordinary AI agent (Claude Code by default) that watches every pane on every PC and **suggests** what to do next. **It never sends anything to a pane.** Each suggestion becomes a card in the sidebar's **Conductor** section, and nothing happens until you tap **Approve**:
+
+- **An answer** to a prompt an agent is blocked on (a permission, a menu choice). Approve sends that answer through the same route as the prompt card. If the screen moved on since the conductor looked, the server refuses it (409 `prompt_changed`), the card turns stale, and nothing is sent.
+- **A message** for an idle or finished agent. Approve opens that pane in the chat and puts the text in its composer as an unsent draft, after whatever you had typed. You press Send yourself.
+
+Dismiss closes a card without acting. A card also turns stale by itself when its prompt is answered some other way, its pane ends or goes back to work, or its PC is removed, and says why. The section shows how many cards are open, also folded. A new card sends a web push (to devices that allow input alerts) and a tap on it opens the pane. **Settings → Appearance → Conductor** hides the section. A paired device that can only watch sees the cards but cannot approve or dismiss them.
+
+**Set up**
+
+1. Run the **Start conductor** action of the herdr web ui plugin (herdr's action menu). It opens a tab running the agent in the plugin's `conductor/` folder with `conductor/CONDUCTOR.md` as its first message. Put `HERDR_WEB_CONDUCTOR_CMD` in the plugin's `env` file to run another agent, for example `HERDR_WEB_CONDUCTOR_CMD=codex` (the brief is added as the last argument). Without the plugin, run the agent in `conductor/` yourself and give it the contents of `CONDUCTOR.md`, replacing `{{CONDUCTOR}}` with `bun /path/to/scripts/conductor.ts`.
+2. With `HERDR_WEB_TOKEN` set, the conductor needs it in its environment (the pane started by the action has it). The conductor's tools are plain HTTP on the connection server, so it works across every PC you added, and a remote bridge needs no update.
+3. The agent will ask before running each command until you allow `conductor.ts` in its own permission settings. That allowance covers only these commands, which can read panes and leave cards.
+
+**What the conductor can do** (`bun scripts/conductor.ts …`, each prints one line of JSON and exits non-zero on an error):
+
+| Command | What it does |
+|---------|--------------|
+| `overview [--agents-only]` | Every PC and its panes: agent, status, folder, name. Also the newest event number. |
+| `pane <machine_id> <pane_id>` | The prompt on screen, the last three turns as plain text (no thinking, no tool output), or a short screen read when the pane has no transcript. |
+| `wait [--since N] [--timeout S]` | Waits up to 30 s for pane status changes after event N. |
+| `suggest-answer <machine_id> <pane_id> --prompt-id ID (--option N \| --options N,M \| --custom TEXT) --summary TEXT` | Leaves an answer card. Refused when the prompt on screen is not that prompt, or is a password prompt. |
+| `suggest-message <machine_id> <pane_id> (--text TEXT \| --text-file PATH) --summary TEXT` | Leaves a message card. |
+| `suggestions [--status open\|approved\|dismissed\|stale]` | The cards, so it does not repeat itself. |
+
+A new card for the same pane and kind replaces the open one. At most 100 cards are open at once; past that the server refuses new ones until some are handled, so cards you have not seen are never dropped. Cards are kept in `conductor-suggestions.json` in the state directory. There is no command that types, presses a key or answers: the only way the conductor acts is a card you approve.
 
 ## Access and safety
 

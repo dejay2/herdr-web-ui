@@ -19,6 +19,7 @@ import machinesFixture from "./fixtures/machines.json";
 import agentsFixture from "./fixtures/agents.json";
 import commandsFixture from "./fixtures/commands.json";
 import panesFixture from "./fixtures/panes.json";
+import { CONDUCTOR_HEADER, type ConductorSuggestion } from "../../shared/conductor.ts";
 import terminalFixture from "./fixtures/terminal.json";
 
 const DEMO_VERSION = "demo";
@@ -226,6 +227,26 @@ function agentOf(paneId: string): string {
 
 const now = () => new Date().toISOString();
 
+// ---- conductor: the master agent's suggestions (server/conductor.ts, shared/conductor.ts). The demo
+// has no agent to post more, so it starts with two cards that can be approved and dismissed. An
+// approved answer goes through the same prompt-answer route as a tap on the prompt card; a
+// message only becomes a draft in the composer, as in the app.
+const conductorCards: ConductorSuggestion[] = [
+  { id: "demo-conductor-answer", machine_id: "local", pane_id: panesFixture.web, kind: "answer", status: "open", created_at: now(), summary: "Codex asks to push the export-guard branch; that is the branch you asked it to publish.", prompt_id: PROMPT.id, answer: { option_index: 0 }, answer_label: PROMPT.options[0]!.label },
+  { id: "demo-conductor-message", machine_id: "local", pane_id: panesFixture.infra, kind: "message", status: "open", created_at: now(), summary: "The backup failed on a full disk; this asks for the fix and a re-run.", text: "Free some space under /var/backups, then run the backup again and tell me how it went." },
+];
+let conductorRevision = 0;
+const conductorOpen = (): number => conductorCards.filter((card) => card.status === "open").length;
+function conductorChanged(): void { emitSse({ type: "conductor", open: conductorOpen(), revision: ++conductorRevision }); }
+/** the prompt was answered some other way: an answer card for that pane can no longer be approved */
+function conductorPaneMoved(paneId: string): void {
+  let changed = false;
+  for (const card of conductorCards) {
+    if (card.status === "open" && card.kind === "answer" && card.pane_id === paneId) { card.status = "stale"; card.stale_reason = "agent_moved_on"; card.resolved_at = now(); changed = true; }
+  }
+  if (changed) conductorChanged();
+}
+
 /** The bridge takes one accepted pending message when the current mock turn finishes. */
 function finishDemoTurn(paneId: string, status: "idle" | "done" = "done"): void {
   replying.delete(paneId);
@@ -254,6 +275,7 @@ function submitToChat(paneId: string, text: string): void {
 
 function answerPrompt(paneId: string, optionIndex: number | undefined): void {
   promptOpen = false;
+  conductorPaneMoved(paneId);
   replying.add(paneId);
   setStatus(paneId, "working");
   const chat = chats.get("web");
@@ -275,6 +297,32 @@ function answerPrompt(paneId: string, optionIndex: number | undefined): void {
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", ...headers } });
 const error = (code: string, message: string, status: number) => json({ error: { code, message } }, status);
+
+/** /api/conductor/*: the list and the three ways to close a card; the conductor's own read routes need a real agent. */
+function conductorRoute(path: string, method: string, query: URLSearchParams, init: RequestInit | undefined): Response {
+  const parts = path.slice("/api/conductor".length).split("/").filter(Boolean);
+  if (parts[0] !== "suggestions") return error("not_found", "the demo has no conductor agent to read panes", 404);
+  if (parts.length === 1 && method === "GET") {
+    const status = query.get("status");
+    return json({ suggestions: conductorCards.filter((card) => status === null || card.status === status) }, 200, { "cache-control": "no-store" });
+  }
+  if (parts.length === 3 && method === "POST") {
+    if (new Headers(init?.headers).get(CONDUCTOR_HEADER) !== "1") return error("invalid_conductor_request", `Conductor changes need the ${CONDUCTOR_HEADER}: 1 header from this app`, 403);
+    const card = conductorCards.find((candidate) => candidate.id === parts[1]);
+    if (!card) return error("suggestion_not_found", "no such suggestion", 404);
+    const action = parts[2];
+    const status = action === "approve" ? "approved" : action === "dismiss" ? "dismissed" : action === "stale" ? "stale" : null;
+    if (status === null) return error("not_found", "unknown endpoint", 404);
+    const movedOn = card.status === "stale" && status === "approved" && card.kind === "answer" && card.stale_reason === "agent_moved_on";
+    if (card.status !== "open" && !movedOn && !(card.status === "stale" && status === "dismissed")) return error("suggestion_closed", `this suggestion is already ${card.status}`, 409);
+    card.status = status;
+    card.resolved_at = now();
+    if (status === "stale") card.stale_reason = "prompt_changed"; else if (status === "approved") delete card.stale_reason;
+    conductorChanged();
+    return json(card);
+  }
+  return error("method_not_allowed", "use GET or POST", 405);
+}
 
 async function bodyOf(init: RequestInit | undefined, input: RequestInfo | URL): Promise<Record<string, unknown>> {
   try {
@@ -341,6 +389,7 @@ async function route(url: URL, method: string, init: RequestInit | undefined, in
   if (path === "/api/access") return json({ port: 7317, tailscale: { state: "running", dns_name: "workstation.example.ts.net", serving_url: "https://workstation.example.ts.net", serve_command: null, serve_url: null } });
   if (path === "/api/usage") return json(usageReport(), 200, { "cache-control": "no-store" });
   if (path === "/api/push" || path.startsWith("/api/push/")) return error("push_unavailable", "the demo sends no alerts", 404);
+  if (path === "/api/conductor" || path.startsWith("/api/conductor/")) return conductorRoute(path, method, query, init);
   if (path === "/api/machines/settings") return json({ auto_update_bridges: true });
   if (path === "/api/machines/tailscale") return json({ state: "running", peers: [
     { name: "workstation", dns_name: "workstation.example.ts.net", address: "workstation.example.ts.net", ips: ["100.64.0.2"], os: "linux", online: true, tags: [] },

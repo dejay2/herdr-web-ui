@@ -256,6 +256,20 @@ describe("push delivery", () => {
     fake.answerWith(201);
     expect(await push.sendTest(fake.subscription.endpoint)).toEqual({ ok: true });
   });
+
+  it("sends a one-off push at once to the devices whose choice allows it (the conductor's new card)", async () => {
+    const push = subscribed();
+    const message = { machine_id: "pc-2", pane_id: "p1", title: "Conductor · laptop · build", body: "Allow the push", tag: "herdr-conductor-abc" };
+    await push.notify(message, (prefs) => prefs.input);
+    const sent = await fake.waitFor((received) => received.payload.tag === "herdr-conductor-abc", "conductor push", 2000);
+    expect(sent.payload).toEqual(message);
+    expect(sent.vapidValid).toBe(true);
+    // a device that wants no questions hears none
+    push.subscribe(fake.subscription, { input: false, done: "long" });
+    fake.received.length = 0;
+    await push.notify(message, (prefs) => prefs.input);
+    expect(fake.received).toHaveLength(0);
+  });
 });
 
 describe("alert timing and each device's choice", () => {

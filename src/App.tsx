@@ -15,6 +15,7 @@ import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { onSettingsHistory, recordSettings } from "./lib/settingsHistory.ts";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { MachineContext } from "./lib/machineContext.tsx";
+import { notifyConductorChanged } from "./lib/conductor.ts";
 import { MachineActionBanner, MachineSidebar } from "./components/MachineSidebar.tsx";
 import { SidebarResizer } from "./components/SidebarResizer.tsx";
 import { storedSidebarWidth } from "./lib/sidebarWidth.ts";
@@ -382,6 +383,8 @@ export function App() {
     events.onmessage = (event) => {
       let payload: MachineEvent;
       try { payload = JSON.parse(event.data); } catch { return; }
+      // the conductor's cards changed: no roster or pane status in it (src/lib/conductor.ts)
+      if (payload.type === "conductor") { notifyConductorChanged(); return; }
       // A poll started before this event can carry an older roster or pane status.
       snapshotRequests.current.invalidate();
       if (payload.type === "machines") {

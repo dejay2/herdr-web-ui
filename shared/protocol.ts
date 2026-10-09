@@ -43,6 +43,8 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
  * /api/machines/:id/{session,agents,pane/*,workspace/*} -> existing target-local API
  * /ws?machine_id=:id -> immutable target, unchanged role + output ACK protocol
  * Legacy paths and missing machine IDs continue to mean local.
+ * `{ type: "conductor", open, revision }` is also a MachineEvent on that SSE stream: the conductor's suggestion
+ * cards changed (shared/conductor.ts, which catalogues /api/conductor/*; connection server only, never proxied).
  */
 
 /** HTTP API

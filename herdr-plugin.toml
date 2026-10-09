@@ -108,3 +108,33 @@ title = "Phone setup"
 contexts = ["workspace"]
 command = ["herdr", "plugin", "pane", "open", "--plugin", "devswha.herdr-web-ui", "--entrypoint", "phone-windows", "--placement", "zoomed", "--focus"]
 platforms = ["windows"]
+
+# The conductor: an ordinary AI agent (Claude Code, or HERDR_WEB_CONDUCTOR_CMD) that watches every pane
+# on every PC and leaves suggestion cards. It can send nothing to a pane; you approve each card.
+[[panes]]
+id = "conductor"
+title = "Conductor"
+placement = "tab"
+command = ["sh", "scripts/with-bun.sh", "scripts/plugin.ts", "conductor"]
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "conductor-windows"
+title = "Conductor"
+placement = "tab"
+command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/plugin.ps1", "conductor"]
+platforms = ["windows"]
+
+[[actions]]
+id = "conductor"
+title = "Start conductor"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "devswha.herdr-web-ui", "--entrypoint", "conductor", "--placement", "tab", "--focus"]
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "conductor-windows"
+title = "Start conductor"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "devswha.herdr-web-ui", "--entrypoint", "conductor-windows", "--placement", "tab", "--focus"]
+platforms = ["windows"]

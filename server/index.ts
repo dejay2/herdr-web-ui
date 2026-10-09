@@ -5,7 +5,7 @@ import { join, resolve, isAbsolute } from "node:path";
 import type { ServerWebSocket } from "bun";
 
 import type { AgentKind, AgentStatus, ClientMessage, ClientRole, HealthAuth, HerdrPane, PendingMessage, ReadFormat, ReadSource, ServerFeature, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
-import { paneTitle } from "../shared/notify-policy.ts";
+import { conductorNotificationTag, paneTitle } from "../shared/notify-policy.ts";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
 import { DEVICE_COOKIE, authClient, handleAuthRequest, isAuthenticated, parseCookies, presentedToken, presentedTokenHeld, recordPresentedTokenFailure, requiresAuth, unauthorizedJson } from "./auth.ts";
 import { cameThroughProxy, decideAccess, isLoopbackAddress, isServeOwnerRequest } from "./access.ts";
@@ -74,7 +74,9 @@ import { handleTelemetryRequest, Telemetry } from "./telemetry.ts";
 import { handleUsageRequest, UsageService } from "./usage.ts";
 import { handleVoiceRequest, VoiceService } from "./voice.ts";
 
-import { BRIDGE_PROTOCOL, type TailscalePeers } from "../shared/machines.ts";
+import { BRIDGE_PROTOCOL, LOCAL_MACHINE, type TailscalePeers } from "../shared/machines.ts";
+import { ConductorError, ConductorEvents, ConductorStore, followMachines } from "./conductor.ts";
+import { handleConductorRequest, type PaneReader } from "./conductor-api.ts";
 import { bridgeIdentity, registerBridge } from "./bridge.ts";
 import { bridgeAgentNews, MachineManager } from "./machines.ts";
 import { handleMachineRequest } from "./machine-api.ts";
@@ -780,6 +782,70 @@ export function createServer(
   const machines = options.machines === false ? null : new MachineManager(options.stateDir ?? defaultStateDir(), push, completions, clientSnapshot);
   const bridgeToken = randomBytes(32).toString("hex");
 
+  // The conductor (server/conductor.ts, shared/conductor.ts) lives on the connection server only; a
+  // bridge carries no cards. It SUGGESTS and never sends to a pane. Its status feed is the machine
+  // stream MachineManager already keeps: no subscription of its own beside the collector's.
+  const conductorEvents = new ConductorEvents();
+  let conductorStore: ConductorStore | null = null;
+  let conductorUnavailable: string | null = null;
+  let stopConductorFeed: (() => void) | null = null;
+  if (machines) {
+    try {
+      conductorStore = new ConductorStore({
+        stateDir: options.stateDir ?? defaultStateDir(),
+        onChange: (open, revision, cause) => {
+          machines.publish({ type: "conductor", open, revision });
+          const added = cause.added;
+          if (!added) return;
+          const machine = machines.list().find((candidate) => candidate.id === added.machine_id);
+          const pane = machine?.snapshot?.panes.find((candidate) => candidate.pane_id === added.pane_id);
+          const where = [machines.list().length > 1 ? machine?.name : undefined, pane ? paneTitle(pane) : added.pane_id].filter(Boolean).join(" · ");
+          push.notify({
+            ...(added.machine_id === LOCAL_MACHINE ? {} : { machine_id: added.machine_id }),
+            pane_id: added.pane_id,
+            title: `Conductor · ${where}`,
+            body: added.summary.slice(0, 160),
+            tag: conductorNotificationTag(added.id),
+          }, (prefs) => prefs.input).catch(logPushError);
+        },
+      });
+      stopConductorFeed = followMachines(machines, conductorEvents, conductorStore);
+    } catch (error) {
+      // an unreadable cards file is kept for recovery; only the conductor is out, never the server
+      conductorUnavailable = error instanceof Error ? error.message : String(error);
+      console.error(`conductor unavailable: ${conductorUnavailable}`);
+    }
+  }
+  /** A pane GET on any PC, as the conductor reads it: this server's own routes by its bridge token, a remote PC through its bridge. */
+  const conductorPaneReader: PaneReader = async (machineId, path, params) => {
+    let base: string;
+    let bearer: string;
+    if (machineId === LOCAL_MACHINE) {
+      const host = hostname === "0.0.0.0" || hostname === "" ? "127.0.0.1" : hostname === "::" ? "[::1]" : hostname.includes(":") && !hostname.startsWith("[") ? `[${hostname}]` : hostname;
+      base = `http://${host}:${server.port}`;
+      bearer = bridgeToken;
+    } else {
+      const endpoint = machines?.endpoint(machineId);
+      if (!endpoint) throw new ConductorError("machine_offline", "This PC is disconnected", 503);
+      base = endpoint.url;
+      bearer = endpoint.token;
+    }
+    let response: Response;
+    try {
+      response = await fetch(`${base}/api/${path}?${new URLSearchParams(params)}`, { headers: { authorization: `Bearer ${bearer}` }, redirect: "error", signal: AbortSignal.timeout(15_000) });
+    } catch {
+      throw new ConductorError("machine_unavailable", "The PC did not answer; retry after it reconnects", 502);
+    }
+    let body: unknown = null;
+    try { body = await response.json(); } catch { /* the status below says it */ }
+    if (!response.ok) {
+      const detail = (body as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+      const status = response.status === 404 || response.status === 409 ? response.status : 502;
+      throw new ConductorError(typeof detail?.code === "string" ? detail.code : "pane_read_failed", typeof detail?.message === "string" ? detail.message : `the PC answered ${response.status}`, status);
+    }
+    return body;
+  };
+
   function broadcast(paneId: string, message: ServerMessage): void {
     const attachment = attachments.get(paneId);
     if (!attachment) return;
@@ -1422,6 +1488,14 @@ export function createServer(
         } catch (error) {
           return errorResponse(error);
         }
+      }
+
+      // suggest-only conductor (shared/conductor.ts); the connection server's alone, after the PC and push routes and before the 404 below
+      if (pathname === "/api/conductor" || pathname.startsWith("/api/conductor/")) {
+        if (!machines) return jsonResponse({ error: { code: "bridge_only", message: "The conductor runs on the connection server" } }, 404);
+        if (!conductorStore) return jsonResponse({ error: { code: "conductor_unavailable", message: conductorUnavailable ?? "The conductor is not available" } }, 503);
+        if (pathname === "/api/conductor/events") bunServer.timeout(request, 40);
+        return handleConductorRequest(request, url, { store: conductorStore, events: conductorEvents, machines, readPane: conductorPaneReader });
       }
 
       if (pathname === "/api/health") {
@@ -2495,6 +2569,7 @@ export function createServer(
       clearInterval(outputTimer);
       collector.stop();
       omo.stop();
+      stopConductorFeed?.();
       machines?.stop();
       registration?.close();
       for (const paneId of [...attachments.keys()]) closeAttachment(paneId);

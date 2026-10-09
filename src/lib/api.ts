@@ -33,6 +33,7 @@ import type { AlertPrefs } from "../../shared/notify-policy.ts";
 import type { TelemetryStatus } from "../../shared/telemetry.ts";
 import type { VoiceConfigUpdate, VoiceStatus } from "../../shared/voice.ts";
 import { MAX_ATTACHMENT_BYTES } from "../../shared/attachments.ts";
+import { CONDUCTOR_HEADER, type ConductorSuggestion } from "../../shared/conductor.ts";
 import { t } from "./i18n.ts";
 
 /** Settings → Phone: what Tailscale on the server's PC already serves, or the command to run. */
@@ -549,6 +550,29 @@ export async function machineRequest<T>(path: string, method = "GET", body?: unk
   if (!response.ok) throw await errorFrom("/api/machines", response);
   return response.json();
 }
+/** GET /api/conductor/suggestions: the open and stale cards (approved and dismissed ones are history the list leaves out). */
+export async function fetchConductorSuggestions(signal?: AbortSignal): Promise<ConductorSuggestion[]> {
+  const response = await fetch("/api/conductor/suggestions", { signal, cache: "no-store" });
+  if (!response.ok) throw await errorFrom("/api/conductor/suggestions", response);
+  const body = (await response.json()) as { suggestions: ConductorSuggestion[] };
+  return body.suggestions.filter((suggestion) => suggestion.status === "open" || suggestion.status === "stale");
+}
+
+/**
+ * POST /api/conductor/suggestions/<id>/<action>: only records what the user did. Approving does not
+ * act; the caller already answered the prompt or put the text in the composer.
+ */
+export async function closeConductorSuggestion(id: string, action: "approve" | "dismiss" | "stale", reason?: string): Promise<ConductorSuggestion> {
+  const url = `/api/conductor/suggestions/${encodeURIComponent(id)}/${action}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", [CONDUCTOR_HEADER]: "1" },
+    body: JSON.stringify(reason === undefined ? {} : { reason }),
+  });
+  if (!response.ok) throw await errorFrom(url, response);
+  return (await response.json()) as ConductorSuggestion;
+}
+
 export const fetchTailscalePeers = () => machineRequest<TailscalePeers>("/tailscale");
 export const startMachineSetup = (request: SetupRequest) => machineRequest<SetupJob>("/setup", "POST", request);
 export const fetchMachineSetup = (id: string) => machineRequest<SetupJob>(`/setup/${encodeURIComponent(id)}`);

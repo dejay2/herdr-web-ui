@@ -184,6 +184,8 @@ export class MachineManager {
     if (this.stopped) return;
     for (const listener of this.listeners) listener(event ?? { type: "machines", machines: this.list() });
   }
+  /** An event of this server's own (the conductor's cards changed) to every machine-stream subscriber. */
+  publish(event: MachineEvent): void { this.emit(event); }
   localMessage(message: ServerMessage): void {
     if (["pane-status", "session-changed", "pane-exited"].includes(message.type)) {
       this.localRevision++;

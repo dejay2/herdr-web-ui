@@ -162,6 +162,9 @@ function AppearancePage() {
       <SettingsRow label={t("Agents order")} description={t("Activity keeps a waiting agent on top, then the one that changed last; herdr's own order is not changed")} wide>
         <Segmented label={t("Agents order")} value={settings.agentOrder} onChange={(agentOrder) => update({ agentOrder })} options={[{ value: "workspace", label: t("Workspaces") }, { value: "activity", label: t("Activity") }]} />
       </SettingsRow>
+      <SettingsRow label={t("Conductor")} description={t("A sidebar list of suggestions from your master agent. It only suggests: nothing is sent until you approve it")}>
+        <Toggle label={t("Conductor")} checked={settings.showConductor} onChange={(showConductor) => update({ showConductor })} />
+      </SettingsRow>
       <SettingsRow label={t("Quiet opened finishes")} description={t("A finished agent you have opened here loses its dot, as herdr's own view would clear it; remembered per PC on this browser")}>
         <Toggle label={t("Quiet opened finishes")} checked={settings.quietOpenedDone} onChange={(quietOpenedDone) => update({ quietOpenedDone })} />
       </SettingsRow>
