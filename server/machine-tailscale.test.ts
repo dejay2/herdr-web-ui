@@ -10,7 +10,7 @@ const get = (readPeers: () => Promise<TailscalePeers>, init: RequestInit = {}) =
 
 describe("GET /api/machines/tailscale", () => {
   it("answers the injected reader, not a machine lookup", async () => {
-    const answer: TailscalePeers = { state: "running", peers: [{ name: "box", dns_name: "box.example.ts.net", address: "box.example.ts.net", os: "linux", online: true, tags: [] }] };
+    const answer: TailscalePeers = { state: "running", peers: [{ name: "box", dns_name: "box.example.ts.net", address: "box.example.ts.net", ips: ["100.64.0.5"], os: "linux", online: true, tags: [] }] };
     const response = await get(async () => answer);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(answer);

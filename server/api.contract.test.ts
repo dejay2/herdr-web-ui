@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, existsSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createServer } from "./index.ts";
+import type { TailscalePeers } from "../shared/machines.ts";
 import type { AgentKind, AgentStatus, ApiError, HealthAuth, PushKey, RemoteAccess, SessionSnapshot, PaneReadResult, UsageReport, WorkspaceCreated, WorktreeListing, WorktreeOpened, WorktreeRemoved } from "../shared/protocol.ts";
 import { HerdrUpdater } from "./herdr-update.ts";
 import { noInstalledNotes, unmanagedUpdateStatus, type HerdrUpdateStatus, type InstalledNotes, type UpdateNotes } from "../shared/update.ts";
@@ -346,6 +347,43 @@ describe("phone access", () => {
     try {
       expect((await fetch(`http://localhost:${protectedServer.port}/api/access`)).status).toBe(401);
     } finally { protectedServer.stop(); rmSync(protectedState, { recursive: true, force: true }); }
+  });
+});
+
+describe("GET /api/machines/tailscale", () => {
+  const peers: TailscalePeers = { state: "running", peers: [{ name: "box", dns_name: "box.example.ts.net", address: "box.example.ts.net", ips: ["100.64.0.5"], os: "linux", online: true, tags: [] }] };
+  const guard = { "x-herdr-machine": "1", "content-type": "application/json" };
+
+  it("answers the injected list with no-store, behind the token gate, and drops a revoked device", async () => {
+    const state = mkdtempSync(join(tmpdir(), "herdr-tailscale-peers-"));
+    const app = createServer({ port: 0, stateDir: state, token: "test-tailscale-token", tailscaleOwner: null, tailscalePeers: async () => peers });
+    const base = `http://localhost:${app.port}`;
+    const admin = { ...guard, authorization: "Bearer test-tailscale-token" };
+    try {
+      const ok = await fetch(`${base}/api/machines/tailscale`, { headers: admin });
+      expect(ok.status).toBe(200);
+      expect(ok.headers.get("cache-control")).toBe("no-store");
+      expect(await ok.json()).toEqual(peers);
+      expect((await fetch(`${base}/api/machines/tailscale`)).status).toBe(401);
+      const { code } = await (await fetch(`${base}/api/devices/pair/start`, { method: "POST", headers: admin })).json() as { code: string };
+      const paired = await fetch(`${base}/api/devices/pair`, { method: "POST", headers: guard, body: JSON.stringify({ code, label: "Phone" }) });
+      expect(paired.status).toBe(204);
+      const cookie = paired.headers.get("set-cookie")!.split(";")[0]!;
+      expect((await fetch(`${base}/api/machines/tailscale`, { headers: { cookie } })).status).toBe(200);
+      const { devices } = await (await fetch(`${base}/api/devices`, { headers: admin })).json() as { devices: { id: string }[] };
+      expect((await fetch(`${base}/api/devices/${devices[0]!.id}`, { method: "DELETE", headers: admin })).status).toBe(204);
+      expect((await fetch(`${base}/api/machines/tailscale`, { headers: { cookie } })).status).toBe(401);
+    } finally { app.stop(); rmSync(state, { recursive: true, force: true }); }
+  });
+
+  it("answers a failed Tailscale read as 502 tailscale_unavailable", async () => {
+    const state = mkdtempSync(join(tmpdir(), "herdr-tailscale-fail-"));
+    const app = createServer({ port: 0, stateDir: state, tailscaleOwner: null, tailscalePeers: async () => { throw new Error("tailscale status failed"); } });
+    try {
+      const response = await fetch(`http://localhost:${app.port}/api/machines/tailscale`);
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({ error: { code: "tailscale_unavailable", message: expect.any(String) } });
+    } finally { app.stop(); rmSync(state, { recursive: true, force: true }); }
   });
 });
 

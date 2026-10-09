@@ -16,6 +16,8 @@ export interface TailscalePeer {
   name: string;
   dns_name: string;
   address: string;
+  /** the peer's Tailscale IPs, so a PC added by IP is still recognised */
+  ips: string[];
   os: string;
   online: boolean;
   tags: string[];

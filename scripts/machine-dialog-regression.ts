@@ -17,7 +17,7 @@ try {
     import ${JSON.stringify(join(repo, "src/styles.css"))};
     import { SettingsProvider } from ${JSON.stringify(join(repo, "src/lib/settings.ts"))};
     import { MachineDialog } from ${JSON.stringify(join(repo, "src/components/MachineDialog.tsx"))};
-    const existing = [{ id: "added", name: "Added PC", kind: "ssh", target: { destination: "me@added.example.ts.net" }, enabled: true, state: "connected", error: null, snapshot: null }];
+    const existing = [{ id: "added", name: "Added PC", kind: "ssh", target: { destination: "me@100.64.0.9" }, enabled: true, state: "connected", error: null, snapshot: null }];
     function Fixture() {
       const [connected, setConnected] = useState("");
       return <SettingsProvider>{connected ? <p>Connected: {connected}</p> :
@@ -64,9 +64,9 @@ try {
             await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(job!) });
           });
           const tailscale: TailscalePeers = { state: "running", peers: [
-            { name: "workstation", dns_name: "workstation.example.ts.net", address: "workstation.example.ts.net", os: "linux", online: true, tags: [] },
-            { name: "added-pc", dns_name: "added.example.ts.net", address: "added.example.ts.net", os: "macOS", online: true, tags: [] },
-            { name: "build-box", dns_name: "build-box.example.ts.net", address: "build-box.example.ts.net", os: "linux", online: false, tags: [] },
+            { name: "workstation", dns_name: "workstation.example.ts.net", address: "workstation.example.ts.net", ips: [], os: "linux", online: true, tags: [] },
+            { name: "added-pc", dns_name: "added.example.ts.net", address: "added.example.ts.net", ips: ["100.64.0.9"], os: "macOS", online: true, tags: [] },
+            { name: "build-box", dns_name: "build-box.example.ts.net", address: "build-box.example.ts.net", ips: [], os: "linux", online: false, tags: [] },
           ] };
           await page.route("**/api/machines/tailscale", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(tailscale) }));
           await page.goto(`http://127.0.0.1:${server.port}/`);

@@ -287,8 +287,9 @@ const text = (value: unknown): string => (typeof value === "string" ? value : ""
  */
 export function parseTailscalePeers(statusJson: string | null): TailscalePeers {
   const status = statusJson === null ? null : parseJson<StatusJson>(statusJson);
-  if (status === null || typeof status !== "object") throw new TailscaleUnavailableError("tailscale status gave no readable answer");
+  if (status === null || typeof status !== "object" || Array.isArray(status) || typeof status.BackendState !== "string") throw new TailscaleUnavailableError("tailscale status gave no readable answer");
   if (status.BackendState !== "Running") return { state: "stopped", peers: [] };
+  if (status.Peer !== undefined && status.Peer !== null && (typeof status.Peer !== "object" || Array.isArray(status.Peer))) throw new TailscaleUnavailableError("tailscale status listed its peers in an unknown shape");
   const peers: TailscalePeer[] = [];
   const raw = status.Peer && typeof status.Peer === "object" ? Object.values(status.Peer) as PeerJson[] : [];
   for (const peer of raw) {
@@ -303,6 +304,7 @@ export function parseTailscalePeers(statusJson: string | null): TailscalePeers {
       name,
       dns_name: dnsName,
       address,
+      ips: ips.filter((ip) => { try { validateTarget({ destination: ip }); return true; } catch { return false; } }),
       os: text(peer.OS),
       online: peer.Online === true,
       tags: Array.isArray(peer.Tags) ? peer.Tags.filter((tag): tag is string => typeof tag === "string") : [],

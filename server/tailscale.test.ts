@@ -239,7 +239,7 @@ describe("parseTailscalePeers", () => {
     }));
     expect(parsed.state).toBe("running");
     expect(parsed.peers.map((peer) => peer.name)).toEqual(["beta", "zeta", "alpha"]);
-    expect(parsed.peers[0]).toEqual({ name: "beta", dns_name: "beta.example.ts.net", address: "beta.example.ts.net", os: "linux", online: true, tags: [] });
+    expect(parsed.peers[0]).toEqual({ name: "beta", dns_name: "beta.example.ts.net", address: "beta.example.ts.net", ips: ["100.64.0.4"], os: "linux", online: true, tags: [] });
     expect(parsed.peers[2]!.tags).toEqual(["tag:ci"]);
     expect(parsed.peers.some((peer) => peer.name === "me")).toBe(false);
   });
@@ -266,6 +266,18 @@ describe("parseTailscalePeers", () => {
   it("throws, rather than answering an empty list, when the status is missing or not JSON", () => {
     expect(() => parseTailscalePeers(null)).toThrow(TailscaleUnavailableError);
     expect(() => parseTailscalePeers("not json")).toThrow(TailscaleUnavailableError);
+  });
+
+  it("rejects a status document of the wrong shape instead of answering stopped or empty", () => {
+    for (const bad of ["{}", "[]", "null", '{"BackendState":5}', '{"BackendState":"Running","Peer":"invalid"}', '{"BackendState":"Running","Peer":[]}']) {
+      expect(() => parseTailscalePeers(bad)).toThrow(TailscaleUnavailableError);
+    }
+    expect(parseTailscalePeers('{"BackendState":"Running"}')).toEqual({ state: "running", peers: [] });
+  });
+
+  it("keeps each peer's valid Tailscale IPs", () => {
+    const [peer] = parseTailscalePeers(status({ a: { DNSName: "x.example.ts.net.", HostName: "x", TailscaleIPs: ["100.64.0.9", "fd7a:115c::9", "bad ip;"] } })).peers;
+    expect(peer!.ips).toEqual(["100.64.0.9", "fd7a:115c::9"]);
   });
 
   it("caps the list", () => {

@@ -2,13 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Monitor, X } from "lucide-react";
 import type { Machine, SetupAction, SetupJob, TailscalePeers } from "../../shared/machines.ts";
 import { answerMachineSetup, fetchMachineSetup, fetchTailscalePeers, startMachineSetup } from "../lib/api.ts";
+import { destinationHost, peerIsAdded } from "../lib/machineHost.ts";
 import { sshOutputParts } from "../lib/sshOutput.ts";
 import { BridgeUpdateProgress } from "./MachineSidebar.tsx";
 import "./Machines.css";
 import { useT } from "../lib/i18n.ts";
-
-/** the host of an SSH destination, for comparing a typed `user@host` with a tailnet address */
-const hostOf = (destination: string) => destination.slice(destination.lastIndexOf("@") + 1).toLowerCase();
 
 type PeerList = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; peers: TailscalePeers };
 
@@ -32,7 +30,7 @@ export function MachineDialog({ machine, machines = [], updateRemote = false, on
   const [peerList, setPeerList] = useState<PeerList>({ status: "loading" });
   const picking = !machine && !job;
   const noTailscale = peerList.status === "ready" && peerList.peers.state === "missing";
-  const added = new Set(machines.flatMap((existing) => existing.target ? [hostOf(existing.target.destination)] : []));
+  const added = new Set(machines.flatMap((existing) => existing.target ? [destinationHost(existing.target.destination)] : []));
   useEffect(() => {
     if (machine) return;
     let cancelled = false;
@@ -92,7 +90,7 @@ export function MachineDialog({ machine, machines = [], updateRemote = false, on
           {peerList.status === "ready" && peerList.peers.state === "running" && (peerList.peers.peers.length === 0
             ? <p className="field-hint">{t("No other PCs on your Tailscale")}</p>
             : <ul className="tailscale-peers">{peerList.peers.peers.map((peer) => {
-              const isAdded = added.has(hostOf(peer.address));
+              const isAdded = peerIsAdded(peer, added);
               return <li key={peer.address}><button type="button" className="tailscale-peer" disabled={!peer.online || isAdded} aria-pressed={destination === peer.address} onClick={() => pick(peer)}>
                 <span className="tailscale-peer-name">{peer.name}</span>
                 <span className="tailscale-peer-meta">{peer.os}</span>
