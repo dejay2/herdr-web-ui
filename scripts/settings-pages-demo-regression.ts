@@ -130,12 +130,38 @@ try {
               const box = menu.getBoundingClientRect(), row = active.getBoundingClientRect();
               return active.textContent?.includes("vim") && row.top >= box.top && row.bottom <= box.bottom;
             });
+            // Enter right after the keystroke that narrows the list, before React's next render, completes the row
+            await page.evaluate(async () => {
+              const box = document.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+              Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "/comments");
+              box.selectionStart = box.selectionEnd = box.value.length;
+              box.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+              await Promise.resolve(); await Promise.resolve();
+              box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+            });
+            await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.value === "/pr-comments ");
             await composer.fill("/comments");
             await menu.getByRole("option").filter({ hasText: "pr-comments" }).waitFor();
             assert.equal(await menu.getByRole("option").count(), 1);
             await composer.press("Tab");
             await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.value === "/pr-comments ");
             assert.equal(await composer.inputValue(), "/pr-comments ");
+            // a key typed after a completion, before the next frame (a busy phone), stays where it was typed
+            await composer.fill("/comments");
+            await menu.getByRole("option").filter({ hasText: "pr-comments" }).waitFor();
+            await page.evaluate(() => {
+              const real = window.requestAnimationFrame, held: FrameRequestCallback[] = [];
+              window.requestAnimationFrame = (callback) => { held.push(callback); return 0; };
+              addEventListener("release-frames", () => {
+                window.requestAnimationFrame = real;
+                for (const callback of held) callback(performance.now());
+              }, { once: true });
+            });
+            await composer.press("Tab");
+            await page.keyboard.type("a");
+            await page.evaluate(() => dispatchEvent(new Event("release-frames")));
+            await page.keyboard.type("b");
+            assert.equal(await composer.inputValue(), "/pr-comments ab");
             await composer.fill("/rln");
             await menu.getByRole("option").filter({ hasText: "release-notes" }).waitFor();
             assert.equal(await menu.getByRole("option").count(), 1);
