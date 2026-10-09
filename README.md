@@ -185,6 +185,27 @@ bun run test:ui    # browser regression checks
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to send a change, [development](docs/development.md) for tests, media and releases, and [DESIGN.md](DESIGN.md) for UI conventions. Report security problems privately: [SECURITY.md](SECURITY.md).
 
+## self-hosting (dejay2 fork)
+
+This fork is the update source for the locally running app: the installed
+bundle carries a manifest (`remote-bundles/manifest-<platform>.json`) that
+points the app's downloader at this repo's `remote-vNN` release instead of
+upstream's. Only the web app is served from here — the herdr engine (core
+binary) still updates from its own releases.
+
+Publishing a change (build, upload the release, re-point the manifest,
+install locally, restart the bridge):
+
+```bash
+./deploy-local.sh
+```
+
+One rule: the bundle version (`REMOTE_BUNDLE_VERSION` in
+`shared/machines.ts`) must match what the running herdr engine expects.
+Bump it only together with a herdr core update; out of turn, the engine
+refuses the bridge (the script warns). When you do bump it, `deploy-local.sh`
+creates the matching `remote-vNN` release automatically.
+
 ## license
 
 [MIT](LICENSE). Copyright © 2026 devswha.
