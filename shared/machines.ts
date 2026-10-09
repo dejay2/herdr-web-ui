@@ -11,6 +11,22 @@ export interface SshTarget {
   identity_file?: string;
   session?: string;
 }
+/** One PC of the user's tailnet, as `GET /api/machines/tailscale` lists it. `address` is the SSH destination to use. */
+export interface TailscalePeer {
+  name: string;
+  dns_name: string;
+  address: string;
+  /** the peer's Tailscale IPs, so a PC added by IP is still recognised */
+  ips: string[];
+  os: string;
+  online: boolean;
+  tags: string[];
+}
+export interface TailscalePeers {
+  /** missing: no Tailscale CLI on the server's PC; stopped: it is installed but not running */
+  state: "missing" | "stopped" | "running";
+  peers: TailscalePeer[];
+}
 export interface Machine {
   id: string;
   name: string;

@@ -6,7 +6,9 @@
  */
 import { existsSync } from "node:fs";
 import type { RemoteAccess, TailscaleAccess } from "../shared/protocol.ts";
+import type { TailscalePeer, TailscalePeers } from "../shared/machines.ts";
 import { addressesNode } from "./access.ts";
+import { validateTarget } from "./machine-security.ts";
 
 const TIMEOUT_MS = 2500;
 /** the macOS App Store build puts no `tailscale` on the PATH; its CLI lives in the app bundle */
@@ -267,4 +269,53 @@ export class TailnetIdentitySource {
     await this.refresh();
     return this.identity();
   }
+}
+
+const MAX_PEERS = 200;
+
+interface PeerJson { DNSName?: unknown; HostName?: unknown; OS?: unknown; Online?: unknown; TailscaleIPs?: unknown; Tags?: unknown }
+
+/** A failed or unreadable `tailscale status`: the picker must say so, never show an empty list. */
+export class TailscaleUnavailableError extends Error {}
+
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/**
+ * Pure: `tailscale status --json` to the PCs of this tailnet a user can pick, without this PC.
+ * The names come from other machines, so an address `validateTarget` rejects drops its PC instead
+ * of reaching ssh. Throws `TailscaleUnavailableError` when the status is missing or not JSON.
+ */
+export function parseTailscalePeers(statusJson: string | null): TailscalePeers {
+  const status = statusJson === null ? null : parseJson<StatusJson>(statusJson);
+  if (status === null || typeof status !== "object" || Array.isArray(status) || typeof status.BackendState !== "string") throw new TailscaleUnavailableError("tailscale status gave no readable answer");
+  if (status.BackendState !== "Running") return { state: "stopped", peers: [] };
+  if (status.Peer !== undefined && status.Peer !== null && (typeof status.Peer !== "object" || Array.isArray(status.Peer))) throw new TailscaleUnavailableError("tailscale status listed its peers in an unknown shape");
+  const peers: TailscalePeer[] = [];
+  const raw = status.Peer && typeof status.Peer === "object" ? Object.values(status.Peer) as PeerJson[] : [];
+  for (const peer of raw) {
+    if (!peer || typeof peer !== "object") continue;
+    const dnsName = text(peer.DNSName).replace(/\.$/, "");
+    const ips = Array.isArray(peer.TailscaleIPs) ? peer.TailscaleIPs.filter((ip): ip is string => typeof ip === "string") : [];
+    const address = dnsName || ips.find((ip) => /^\d+\.\d+\.\d+\.\d+$/.test(ip)) || "";
+    if (!address) continue;
+    try { validateTarget({ destination: address }); } catch { continue; }
+    const name = (text(peer.HostName) || dnsName.split(".")[0] || address).slice(0, 100);
+    peers.push({
+      name,
+      dns_name: dnsName,
+      address,
+      ips: ips.filter((ip) => { try { validateTarget({ destination: ip }); return true; } catch { return false; } }),
+      os: text(peer.OS),
+      online: peer.Online === true,
+      tags: Array.isArray(peer.Tags) ? peer.Tags.filter((tag): tag is string => typeof tag === "string") : [],
+    });
+  }
+  peers.sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+  return { state: "running", peers: peers.slice(0, MAX_PEERS) };
+}
+
+/** The tailnet's PCs from this PC's Tailscale CLI: `missing` without the binary, an error when the CLI fails. */
+export async function readTailscalePeers(binary: string | null = tailscaleBinary()): Promise<TailscalePeers> {
+  if (binary === null) return { state: "missing", peers: [] };
+  return parseTailscalePeers(await run(binary, ["status", "--json"]));
 }

@@ -8,6 +8,9 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 ## [Unreleased]
 
 ### Added
+- **Add PC** lists the PCs on your Tailscale network above the address field: tap an online one to
+  fill in its address and name instead of typing them. It needs the Tailscale CLI on the web
+  server's PC; without it the list is hidden.
 - **Settings → Voice input → Dictation language** picks the language dictation listens for. On Auto,
   a browser whose first language the app is not translated into (Hungarian, German, …) is heard in
   that language rather than in English; every other case listens for the app's language as before.

@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { decideAccess, type AccessInput } from "./access.ts";
-import { parseSoleTailnetLogin, parseTailscale, parseTailscaleIp, TailnetIdentitySource, type TailnetIdentity } from "./tailscale.ts";
+import { parseSoleTailnetLogin, parseTailscalePeers, TailscaleUnavailableError, parseTailscale, parseTailscaleIp, TailnetIdentitySource, type TailnetIdentity } from "./tailscale.ts";
 
 const status = (state = "Running", dns = "pc.example.ts.net.") => JSON.stringify({ BackendState: state, Self: { DNSName: dns } });
 /** a `tailscale serve status --json` document: listeners by port, and one "/" proxy per host:port */
@@ -225,5 +225,63 @@ describe("parseTailscale", () => {
     expect(access.dns_name).toBeNull();
     expect(access.serve_command).toBe("tailscale serve --bg --https=443 http://127.0.0.1:7317");
     expect(access.serve_url).toBeNull();
+  });
+});
+
+describe("parseTailscalePeers", () => {
+  const status = (peers: Record<string, unknown>, backend = "Running") => JSON.stringify({ BackendState: backend, Self: { DNSName: "me.example.ts.net.", HostName: "me", TailscaleIPs: ["100.64.0.1"] }, Peer: peers });
+
+  it("lists peers without this PC, strips the trailing dot and sorts online first, then by name", () => {
+    const parsed = parseTailscalePeers(status({
+      a: { DNSName: "zeta.example.ts.net.", HostName: "zeta", OS: "linux", Online: true, TailscaleIPs: ["100.64.0.2"] },
+      b: { DNSName: "alpha.example.ts.net.", HostName: "alpha", OS: "macOS", Online: false, TailscaleIPs: ["100.64.0.3"], Tags: ["tag:ci"] },
+      c: { DNSName: "beta.example.ts.net.", HostName: "beta", OS: "linux", Online: true, TailscaleIPs: ["100.64.0.4"] },
+    }));
+    expect(parsed.state).toBe("running");
+    expect(parsed.peers.map((peer) => peer.name)).toEqual(["beta", "zeta", "alpha"]);
+    expect(parsed.peers[0]).toEqual({ name: "beta", dns_name: "beta.example.ts.net", address: "beta.example.ts.net", ips: ["100.64.0.4"], os: "linux", online: true, tags: [] });
+    expect(parsed.peers[2]!.tags).toEqual(["tag:ci"]);
+    expect(parsed.peers.some((peer) => peer.name === "me")).toBe(false);
+  });
+
+  it("falls back to the first IPv4 address when a peer has no DNS name", () => {
+    const [peer] = parseTailscalePeers(status({ a: { HostName: "box", Online: true, TailscaleIPs: ["fd7a:115c::1", "100.64.0.9"] } })).peers;
+    expect(peer).toMatchObject({ name: "box", dns_name: "", address: "100.64.0.9" });
+  });
+
+  it("drops a peer whose address could reach ssh as an option or shell syntax", () => {
+    const parsed = parseTailscalePeers(status({
+      a: { DNSName: "-oProxyCommand=evil.example.ts.net.", HostName: "x", Online: true },
+      b: { DNSName: "a b;rm.example.ts.net.", HostName: "y", Online: true },
+      c: { HostName: "no-address", Online: true, TailscaleIPs: [] },
+      d: { DNSName: "ok.example.ts.net.", HostName: "ok", Online: true },
+    }));
+    expect(parsed.peers.map((peer) => peer.name)).toEqual(["ok"]);
+  });
+
+  it("reports a stopped Tailscale with no peers", () => {
+    expect(parseTailscalePeers(status({ a: { DNSName: "x.example.ts.net." } }, "Stopped"))).toEqual({ state: "stopped", peers: [] });
+  });
+
+  it("throws, rather than answering an empty list, when the status is missing or not JSON", () => {
+    expect(() => parseTailscalePeers(null)).toThrow(TailscaleUnavailableError);
+    expect(() => parseTailscalePeers("not json")).toThrow(TailscaleUnavailableError);
+  });
+
+  it("rejects a status document of the wrong shape instead of answering stopped or empty", () => {
+    for (const bad of ["{}", "[]", "null", '{"BackendState":5}', '{"BackendState":"Running","Peer":"invalid"}', '{"BackendState":"Running","Peer":[]}']) {
+      expect(() => parseTailscalePeers(bad)).toThrow(TailscaleUnavailableError);
+    }
+    expect(parseTailscalePeers('{"BackendState":"Running"}')).toEqual({ state: "running", peers: [] });
+  });
+
+  it("keeps each peer's valid Tailscale IPs", () => {
+    const [peer] = parseTailscalePeers(status({ a: { DNSName: "x.example.ts.net.", HostName: "x", TailscaleIPs: ["100.64.0.9", "fd7a:115c::9", "bad ip;"] } })).peers;
+    expect(peer!.ips).toEqual(["100.64.0.9", "fd7a:115c::9"]);
+  });
+
+  it("caps the list", () => {
+    const many = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [String(i), { DNSName: `h${i}.example.ts.net.`, HostName: `h${i}`, Online: true }]));
+    expect(parseTailscalePeers(status(many)).peers).toHaveLength(200);
   });
 });

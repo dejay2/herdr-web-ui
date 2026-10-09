@@ -1,7 +1,8 @@
-import type { SetupAction, SetupRequest } from "../shared/machines.ts";
+import type { SetupAction, SetupRequest, TailscalePeers } from "../shared/machines.ts";
 import { MachineManager } from "./machines.ts";
 import { canSendSecret, sameOrigin } from "./machine-security.ts";
 import { isJsonObject, jsonResponse } from "./http.ts";
+import { readTailscalePeers } from "./tailscale.ts";
 
 const fail = (code: string, message: string, status: number) => jsonResponse({ error: { code, message } }, status);
 export const MACHINE_PROXY_PATH = /^(?:session|agents|pane\/(?:read|scroll|selection|conversation(?:\/image|\/tool-output)?|commands|files|omo-tasks|prompt|prompt\/answer|input|keys|close|rename|image)|workspace\/(?:create|rename|move|close|directories)|worktree\/(?:create|list|open|remove)|tab\/(?:create|rename|close)|fs\/(?:stat|file))$/;
@@ -21,7 +22,7 @@ function transportFailure(id: string, path: string, error: unknown): Response {
     : fail("machine_unavailable", "The PC connection was interrupted; retry after reconnecting", 502);
 }
 
-export async function handleMachineRequest(request: Request, manager: MachineManager, onRevoke?: (close: () => void) => () => void): Promise<Response> {
+export async function handleMachineRequest(request: Request, manager: MachineManager, onRevoke?: (close: () => void) => () => void, readPeers: () => Promise<TailscalePeers> = readTailscalePeers): Promise<Response> {
   const url = new URL(request.url);
   // A PC's file opens as this PC's /api/fs/file does, from any navigation: reading it changes
   // nothing, and Chrome on Android shows a PDF in the viewer's frame as an "Open" button whose
@@ -82,6 +83,14 @@ export async function handleMachineRequest(request: Request, manager: MachineMan
       const patch = await request.json();
       if (!isJsonObject(patch)) return fail("invalid_body", "Expected PC settings", 400);
       return jsonResponse(manager.updateSettings(patch));
+    }
+    if (parts[0] === "tailscale" && parts.length === 1) {
+      if (request.method !== "GET") return fail("method_not_allowed", "Use GET", 405);
+      try { return jsonResponse(await readPeers()); }
+      catch (error) {
+        console.error(`tailscale peers: ${error instanceof Error ? error.message : String(error)}`);
+        return fail("tailscale_unavailable", "Could not read the Tailscale PC list; check that Tailscale is running on the web server's PC", 502);
+      }
     }
     const id = parts[0]!;
     if (parts.length === 2 && parts[1] === "update-bridge" && request.method === "POST") return jsonResponse(manager.updateBridge(id), 202);

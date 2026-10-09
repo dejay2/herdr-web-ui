@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
-import type { SetupJob, SetupRequest } from "../shared/machines.ts";
+import type { Machine, SetupJob, SetupRequest, TailscalePeers } from "../shared/machines.ts";
 
 // Render the real dialog against synthetic setup responses. No SSH host or herdr is used.
 const repo = join(import.meta.dir, "..");
@@ -17,10 +17,11 @@ try {
     import ${JSON.stringify(join(repo, "src/styles.css"))};
     import { SettingsProvider } from ${JSON.stringify(join(repo, "src/lib/settings.ts"))};
     import { MachineDialog } from ${JSON.stringify(join(repo, "src/components/MachineDialog.tsx"))};
+    const existing = [{ id: "added", name: "Added PC", kind: "ssh", target: { destination: "me@100.64.0.9" }, enabled: true, state: "connected", error: null, snapshot: null }];
     function Fixture() {
       const [connected, setConnected] = useState("");
       return <SettingsProvider>{connected ? <p>Connected: {connected}</p> :
-        <MachineDialog onClose={() => setConnected("closed")} onConnected={setConnected} />}</SettingsProvider>;
+        <MachineDialog machines={existing as never} onClose={() => setConnected("closed")} onConnected={setConnected} />}</SettingsProvider>;
     }
     createRoot(document.getElementById("root")).render(<Fixture />);
   `);
@@ -62,9 +63,46 @@ try {
             } else assert.equal(request.method(), "GET");
             await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(job!) });
           });
+          const tailscale: TailscalePeers = { state: "running", peers: [
+            { name: "workstation", dns_name: "workstation.example.ts.net", address: "workstation.example.ts.net", ips: [], os: "linux", online: true, tags: [] },
+            { name: "added-pc", dns_name: "added.example.ts.net", address: "added.example.ts.net", ips: ["100.64.0.9"], os: "macOS", online: true, tags: [] },
+            { name: "build-box", dns_name: "build-box.example.ts.net", address: "build-box.example.ts.net", ips: [], os: "linux", online: false, tags: [] },
+          ] };
+          await page.route("**/api/machines/tailscale", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(tailscale) }));
           await page.goto(`http://127.0.0.1:${server.port}/`);
           const dialog = page.getByRole("dialog", { name: "Add PC", exact: true });
           const destination = dialog.getByRole("textbox", { name: "SSH alias or user@address", exact: true });
+          // the Tailscale list: online rows can be picked, an offline or already added PC cannot
+          const list = dialog.getByRole("region", { name: "Your Tailscale PCs", exact: true });
+          const workstation = list.getByRole("button", { name: /workstation/ });
+          await workstation.waitFor();
+          assert.equal(await workstation.isDisabled(), false);
+          assert.equal(await list.getByRole("button", { name: /build-box/ }).isDisabled(), true, "offline rows are disabled");
+          assert.equal(await list.getByRole("button", { name: /added-pc/ }).isDisabled(), true, "an added PC is disabled");
+          assert.match(await list.getByRole("button", { name: /added-pc/ }).innerText(), /Added/);
+          const overflow = await dialog.evaluate((element) => element.scrollWidth > element.clientWidth);
+          assert.equal(overflow, false, "the list does not widen the dialog");
+          await workstation.click();
+          const nameField = dialog.getByRole("textbox", { name: "PC name", exact: true });
+          assert.equal(await destination.inputValue(), "workstation.example.ts.net");
+          assert.equal(await nameField.inputValue(), "workstation");
+          assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Connect", "Connect takes the focus");
+          // the picked address and name are what Connect sends (a fresh page, so the main flow below starts clean)
+          const picked = await context.newPage();
+          const sent: SetupRequest[] = [];
+          await picked.route("**/api/machines/tailscale", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(tailscale) }));
+          await picked.route("**/api/machines/setup", async (route) => {
+            sent.push(route.request().postDataJSON());
+            await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "picked", machine_id: "fixture", target: { destination: "x" }, phase: "failed", step: "Connection failed", error: "fixture", action_required: null, installations: [], challenge: null, ssh_output: null, progress: null }) });
+          });
+          await picked.goto(`http://127.0.0.1:${server.port}/`);
+          await picked.getByRole("button", { name: /workstation/ }).click();
+          await picked.keyboard.press("Enter");
+          await picked.getByRole("button", { name: "Retry connection", exact: true }).waitFor();
+          assert.deepEqual(sent, [{ destination: "workstation.example.ts.net", name: "workstation" }]);
+          await picked.close();
+          await destination.fill("");
+          await nameField.fill("");
           await destination.fill("fixture-only");
           await destination.press("Enter");
           const update = dialog.getByRole("button", { name: "Update bridge and connect", exact: true });

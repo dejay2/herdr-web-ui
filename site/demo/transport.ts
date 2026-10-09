@@ -342,6 +342,11 @@ async function route(url: URL, method: string, init: RequestInit | undefined, in
   if (path === "/api/usage") return json(usageReport(), 200, { "cache-control": "no-store" });
   if (path === "/api/push" || path.startsWith("/api/push/")) return error("push_unavailable", "the demo sends no alerts", 404);
   if (path === "/api/machines/settings") return json({ auto_update_bridges: true });
+  if (path === "/api/machines/tailscale") return json({ state: "running", peers: [
+    { name: "workstation", dns_name: "workstation.example.ts.net", address: "workstation.example.ts.net", ips: ["100.64.0.2"], os: "linux", online: true, tags: [] },
+    { name: "mac-mini", dns_name: "mac-mini.example.ts.net", address: "mac-mini.example.ts.net", ips: ["100.64.0.3"], os: "macOS", online: true, tags: [] },
+    { name: "build-box", dns_name: "build-box.example.ts.net", address: "build-box.example.ts.net", ips: ["100.64.0.4"], os: "linux", online: false, tags: [] },
+  ] }, 200, { "cache-control": "no-store" });
   if (path.startsWith("/api/machines/")) return error("demo", "remote PCs need a real machine", 404);
 
   if (path === "/api/worktree/list" || path === "/api/worktree/create" || path === "/api/worktree/open" || path === "/api/worktree/remove") {
