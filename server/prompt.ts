@@ -1950,9 +1950,10 @@ const PI_MODEL_HINT_RE = /enter to select\s*·\s*ctrl\+s to set as default\s*·\
 const PI_MODEL_HINT_AT_END_RE = new RegExp(`${PI_MODEL_HINT_RE.source}$`, "i");
 /**
  * pi's own footer, under `/model` and under every dialog alike: the pane's folder, then its
- * context meter. A hint is allowed this many lines of it before the bottom of the screen.
+ * context meter, then one status line holding every extension's `setStatus` text. A hint is
+ * allowed this many lines of it before the bottom of the screen.
  */
-const PI_FOOTER_LINES = 2;
+const PI_FOOTER_LINES = 3;
 
 /**
  * Whether a hint is the last thing before an agent's footer, allowing for a phone's pane being

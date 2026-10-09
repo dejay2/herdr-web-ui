@@ -2282,6 +2282,20 @@ ${MODEL_HINT}
     expect(answerKeys(prompt, { option_index: 1 })).toEqual([{ keys: ["down"] }, { keys: ["enter"] }]);
   });
 
+  // Extensions put their status text on pi's third footer line (`ctx.ui.setStatus`), so a live
+  // dialog's hint sits over folder, meter and status: three lines, not the two pi draws alone.
+  test("reads a dialog whose hint sits over pi's footer plus its extension status line", () => {
+    const withStatus = login.replace(
+      "/tmp/pr\n0.0%/215k (auto)  vllm-flash/Qwen3.8-Flash-Nex\n",
+      "/tmp/pr\n0.0%/215k (auto)  vllm-flash/Qwen3.8-Flash-Nex\n⚡ - · gen 1s · plain talk ⚡ 267 tok/s · peak 267\n",
+    );
+    const prompt = parseInteractivePrompt("pi", withStatus)!;
+    expect(prompt.options.map((option) => option.label)).toEqual([
+      "Sign in with an account",
+      "Sign in with an API key",
+    ]);
+  });
+
   test("goes stale on a phone's pane once a wrapped dialog hint is buried", () => {
     expect(parseInteractivePrompt("pi", login)).not.toBeNull();
     // pi keeps the answered dialog on screen; what comes after buries the hint, and a card still
