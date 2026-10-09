@@ -11,9 +11,16 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 GITHUB_REPO="dejay2/herdr-web-ui"
-BUNDLE_DIR="$(ls -d "$HOME/.local/share/herdr-web-ui"/remote-v*-e* 2>/dev/null | sort | tail -1)"
-BUN="$HOME/.local/share/herdr-web-ui/$(basename "$BUNDLE_DIR")/bin/bun"
-[ -x "$BUN" ] || BUN="$(command -v bun)"
+BUNDLE_BASE="$HOME/.local/share/herdr-web-ui"
+# the highest installed version wins (remote-vNN-<hash>); after an official
+# update a new NN folder appears and this must follow it
+BUNDLE_NAME="$(find "$BUNDLE_BASE" -maxdepth 1 -mindepth 1 -type d -name 'remote-v*' -printf '%f\n' \
+  | awk -F- '{ print substr($2, 2), $0 }' | sort -k1,1n | tail -1 | cut -d' ' -f2-)"
+[ -n "$BUNDLE_NAME" ] || { echo "no installed herdr-web-ui bundle found under $BUNDLE_BASE" >&2; exit 1; }
+BUNDLE_DIR="$BUNDLE_BASE/$BUNDLE_NAME"
+BUN="$BUNDLE_DIR/bin/bun"
+[ -x "$BUN" ] || BUN="$(command -v bun || true)"
+[ -n "$BUN" ] || { echo "bun not found (no $BUNDLE_DIR/bin/bun and none in PATH)" >&2; exit 1; }
 # the build scripts call `bun` by name for their own steps
 export PATH="$(dirname "$BUN"):$PATH"
 PLATFORM="${1:-linux-x64}"
@@ -51,6 +58,14 @@ print(open(out).read())
 PY
 
 # --- install into the running app ---
+# the bridge reports this version to herdr; a mismatch (e.g. bumped the fork
+# ahead of a herdr core update) makes herdr refuse it. Refuse early, loudly.
+RUNNING_VERSION="$(basename "$BUNDLE_NAME" | sed 's/^remote-v\([0-9]*\).*/\1/')"
+if [ "$VERSION" != "$RUNNING_VERSION" ]; then
+  echo "warning: fork is at bundle v$VERSION but this herdr expects v$RUNNING_VERSION" >&2
+  echo "bumping the version only makes sense together with a herdr core update;" >&2
+  echo "herdr will refuse the bridge otherwise. Continuing anyway." >&2
+fi
 mkdir -p "$BUNDLE_DIR/remote-bundles"
 cp "remote-bundles/manifest-$PLATFORM-github.json" "$BUNDLE_DIR/remote-bundles/manifest-$PLATFORM.json"
 # code, not the runtime: bin/ and bundle.json stay the official ones
