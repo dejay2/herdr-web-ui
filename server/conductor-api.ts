@@ -162,7 +162,8 @@ async function createSuggestion(deps: ConductorDeps, body: unknown): Promise<Res
   const seenSeq = deps.events.paneSeq(request.machine_id, request.pane_id);
   // a password or passphrase prompt is never something an agent may answer or talk over
   const screen = screenOf(await deps.readPane(request.machine_id, "pane/read", { pane_id: request.pane_id, source: "detection", format: "text" }));
-  if (secretPrompt(screen, paneColumns(screen)) !== null) throw new ConductorError("secret_prompt", "the pane is asking for a password or passphrase; nothing is suggested for it", 422);
+  const layoutWidth = findPane(deps.machines.list(), request.machine_id, request.pane_id).machine.snapshot?.layouts?.flatMap((layout) => layout.panes).find((entry) => entry.pane_id === request.pane_id)?.rect.width;
+  if (showsSecretPrompt(screen, layoutWidth)) throw new ConductorError("secret_prompt", "the pane is asking for a password or passphrase; nothing is suggested for it", 422);
   let label: string | undefined;
   if (request.kind === "answer") {
     const prompt = promptOf(await deps.readPane(request.machine_id, "pane/prompt", { pane_id: request.pane_id }));
@@ -262,4 +263,17 @@ export async function handleConductorRequest(request: Request, url: URL, deps: C
     if (error instanceof ConductorError) return failure(error);
     return errorResponse(error);
   }
+}
+
+/**
+ * Whether the screen ends in a password prompt at ANY plausible pane width (fail closed). The read
+ * carries no width; the layout rect is not the current size, so it is only one more candidate. The
+ * inferred width is the longest trimmed row, and a row that wrapped after a space lost it to the
+ * trim, so one and two columns more are tried too.
+ */
+export function showsSecretPrompt(screen: string, layoutWidth?: number): boolean {
+  const inferred = paneColumns(screen);
+  const widths = new Set([inferred, inferred + 1, inferred + 2]);
+  if (layoutWidth !== undefined && Number.isInteger(layoutWidth) && layoutWidth > 0) widths.add(layoutWidth);
+  return [...widths].some((columns) => secretPrompt(screen, columns) !== null);
 }

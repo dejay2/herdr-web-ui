@@ -7,7 +7,7 @@ import { CONDUCTOR_HEADER, type ConductorPane, type ConductorSuggestion } from "
 import type { Machine } from "../shared/machines.ts";
 import type { HerdrPane, InteractivePrompt } from "../shared/protocol.ts";
 import { ConductorError, ConductorEvents, ConductorStore } from "./conductor.ts";
-import { checkAnswer, handleConductorRequest, paneColumns, reduceTurns, type ConductorDeps } from "./conductor-api.ts";
+import { checkAnswer, handleConductorRequest, paneColumns, reduceTurns, showsSecretPrompt, type ConductorDeps } from "./conductor-api.ts";
 
 const pane = (id: string, over: Partial<HerdrPane> = {}): HerdrPane => ({ pane_id: id, agent: "claude", agent_status: "blocked", cwd: "/work/app", label: null, title: "Fix the build", focused: false, revision: 1, tab_id: "t1", terminal_id: "term", workspace_id: "w1", ...over }) as HerdrPane;
 const machine = (id: string, name: string, panes: HerdrPane[], state: Machine["state"] = "connected"): Machine => ({ id, name, kind: id === "local" ? "local" : "ssh", enabled: true, state, error: null, snapshot: { panes } as Machine["snapshot"] });
@@ -277,6 +277,17 @@ describe("suggestions", () => {
     // the same two rows of ordinary prose are no secret prompt
     screens["local/p_2"] = "Building the project and then\nrunning the tests";
     expect((await call("POST", "/api/conductor/suggestions", messageBody)).status).toBe(201);
+  });
+
+  it("sees a passphrase prompt wrapped after a space the trim removed (25 columns)", async () => {
+    const screen = "Enter passphrase for key\n'/tmp/key':";
+    expect(paneColumns(screen)).toBe(24);
+    expect(showsSecretPrompt(screen)).toBe(true);
+    expect(showsSecretPrompt(screen, 25)).toBe(true);
+    expect(showsSecretPrompt("Building the project\nand running tests")).toBe(false);
+    screens["local/p_2"] = screen;
+    const refused = await call("POST", "/api/conductor/suggestions", messageBody);
+    expect([refused.status, (await errorOf(refused)).code]).toEqual([422, "secret_prompt"]);
   });
 
   it("measures the width from the read itself", () => {
