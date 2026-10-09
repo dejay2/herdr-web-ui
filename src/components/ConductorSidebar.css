@@ -1,0 +1,216 @@
+/* The master agent's suggestions, docked above Agents like it: a fold, then one card per
+   suggestion. It takes the height of its cards, at most 36% of the sidebar, and scrolls inside. */
+.conductor-sidebar {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 36%;
+  padding: var(--space-2) var(--side-gutter) 0;
+}
+
+.conductor-sidebar.is-collapsed,
+.conductor-sidebar.is-empty { flex: 0 0 auto; }
+
+.conductor-section-toggle {
+  flex: 0 0 auto;
+  width: 100%;
+  cursor: pointer;
+}
+
+/* the fold's caret hangs in the leading cell and shows when it is of use */
+.conductor-section-caret {
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-inline: calc((var(--side-box) - var(--space-4)) / 2);
+  opacity: 0;
+}
+
+.conductor-section-toggle:focus-visible .conductor-section-caret,
+.conductor-sidebar.is-collapsed .conductor-section-caret { opacity: 1; }
+
+@media (hover: hover) {
+  .conductor-section-toggle:hover .conductor-section-caret { opacity: 1; }
+}
+
+@media (pointer: coarse) {
+  .conductor-section-caret { opacity: 1; }
+}
+
+/* how many cards wait for a tap, also while the fold is shut */
+.conductor-section-count {
+  min-width: var(--space-5);
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--status-blocked-tint);
+  color: var(--status-blocked);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-base);
+  text-align: center;
+}
+
+.conductor-contents {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: var(--space-2);
+}
+
+.conductor-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conductor-empty,
+.conductor-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--side-box);
+  font-size: var(--fs-sm);
+}
+
+.conductor-empty { color: var(--text-dim); }
+.conductor-error { color: var(--danger-text); }
+
+.conductor-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+
+.conductor-card.is-selected { border-color: var(--border-strong); }
+.conductor-card.is-stale { opacity: 0.8; }
+
+/* who the card is about; a tap opens that pane */
+.conductor-card-open {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--side-row-2);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conductor-card-open:focus-visible { outline-offset: calc(var(--ring-offset) * -1); }
+.conductor-card-open:disabled { cursor: default; }
+
+@media (hover: hover) {
+  .conductor-card-open:enabled:hover { background: var(--side-hover); }
+}
+
+.conductor-card-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.conductor-card-title,
+.conductor-card-context {
+  overflow: hidden;
+  line-height: var(--lh-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conductor-card-title {
+  color: var(--text-strong);
+  font-size: var(--fs-md);
+}
+
+.conductor-card-context {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.conductor-card-summary,
+.conductor-card-detail,
+.conductor-card-hint,
+.conductor-card-stale,
+.conductor-card-note {
+  margin: 0;
+  padding-inline: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.conductor-card-summary {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+}
+
+.conductor-card-detail {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+}
+
+/* a suggested message can run long: the card shows its start, the composer gets all of it */
+.conductor-card-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.conductor-card-label {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+}
+
+.conductor-card-hint {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.conductor-card-stale {
+  color: var(--status-blocked);
+  font-size: var(--fs-sm);
+}
+
+.conductor-card-note {
+  color: var(--danger-text);
+  font-size: var(--fs-sm);
+}
+
+.conductor-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+}
+
+.conductor-card-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.conductor-card-actions .btn svg {
+  flex: none;
+  width: var(--icon-size);
+  height: var(--icon-size);
+}

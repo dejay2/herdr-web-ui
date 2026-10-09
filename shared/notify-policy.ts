@@ -34,6 +34,11 @@ export function paneNotificationTag(paneId: string, machineId = "local"): string
   return machineId === "local" ? `herdr-pane-${paneId}` : `herdr-remote-${encodeURIComponent(machineId)}-${encodeURIComponent(paneId)}`;
 }
 
+/** One notification slot per conductor suggestion (shared/conductor.ts); its click opens the suggested pane. */
+export function conductorNotificationTag(suggestionId: string): string {
+  return `herdr-conductor-${suggestionId}`;
+}
+
 /**
  * What one device wants to be alerted about. `input`: an agent waiting on the user.
  * `done`: a finished turn: never, only after one that worked a while (`long`, the default:

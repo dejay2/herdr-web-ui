@@ -92,7 +92,11 @@ export interface SetupJob {
   progress?: SetupProgress | null;
 }
 export type SetupAction = { action: "answer"; challenge_id: string; answer: string } | { action: "approve" } | { action: "cancel" };
-export type MachineEvent = { type: "machines"; machines: Machine[] } | { type: "machine-message"; machine_id: string; message: ServerMessage };
+export type MachineEvent =
+  | { type: "machines"; machines: Machine[] }
+  | { type: "machine-message"; machine_id: string; message: ServerMessage }
+  /** the conductor's suggestion cards changed (shared/conductor.ts): `open` cards now, `revision` moves with every change */
+  | { type: "conductor"; open: number; revision: number };
 export interface BridgeHealth { ok: true; auth: HealthAuth; bridge_protocol: number }
 export interface BridgeIdentity {
   pid: number;

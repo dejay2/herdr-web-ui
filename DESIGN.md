@@ -723,6 +723,23 @@ One set for both themes: the card is island black wherever it shows.
   icon's color, with the skill caret. Opened, the task's answer renders as Markdown, indented to
   the title, bounded to 60vh.
 
+### Conductor section and cards (`.conductor-sidebar`, `.conductor-card`)
+- A collapsible section docked above **Agents** in the sidebar, built like it: a `.sidebar-section-label`
+  head with the fold caret in the leading cell (always drawn on coarse pointers and while folded),
+  then the list. It takes the height of its cards, at most 36% of the sidebar, and scrolls inside.
+  The open-card count is a pill in the head (`--status-blocked-tint` fill, `--status-blocked` text,
+  `--fs-xs`, `--radius-pill`), also while folded. In the drawer (`max-width: 768px`) it starts
+  folded. Empty, it says **No suggestions** in dim `--fs-sm`; with no conductor on the server, or
+  with Settings → Appearance → Conductor off, the section is not drawn.
+- A card is `--bg-elevated`, a `--border` hairline (`--border-strong` while its pane is open),
+  `--radius-lg`, no shadow. From the top: the pane row (agent mark, pane title in `--text-strong`,
+  PC and agent in dim `--fs-xs`; a tap opens the pane), the one-line summary (`--fs-sm`), what an
+  approval does (an answer's option label, or a message draft clamped to four lines, with a dim
+  caps label), a stale reason in `--status-blocked`, an error note in `--danger-text`, and a row
+  of **Approve** (`.btn-primary`) and **Dismiss** (`.btn`) that share the card's width and wrap on
+  a phone (390px). A stale card is dimmed, has no Approve and keeps Dismiss. Text wraps anywhere;
+  nothing is cut except the message clamp.
+
 ### Prompt card (`.prompt-card`)
 - Appears in chat while the agent is blocked and the visible pane contains a supported Claude, omp,
   omo or codex question, approval or plan menu.

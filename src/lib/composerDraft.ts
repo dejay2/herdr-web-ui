@@ -1,3 +1,5 @@
+import { paneStorageId } from "../../shared/machines.ts";
+
 /** Drafts and in-flight sends belong to their pane, even while its composer is unmounted. */
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 interface Draft { text: string; sending: boolean }
@@ -137,3 +139,5 @@ if (typeof window !== "undefined") window.addEventListener("storage", (event) =>
   const key = storageEventDraft(event.key);
   if (key !== null) composerDrafts.refresh(key);
 });
+/** The key one pane's composer draft lives under (the Composer's own, and a conductor suggestion's text put there). */
+export const composerDraftKey = (machineId: string, paneId: string): string => `herdr-web-ui:composer-draft:${paneStorageId(machineId, paneId)}`;

@@ -11,6 +11,14 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 - **Add PC** lists the PCs on your Tailscale network above the address field: tap an online one to
   fill in its address and name instead of typing them. It needs the Tailscale CLI on the web
   server's PC; without it the list is hidden.
+- **Conductor**: one master agent (Claude Code by default, started by the plugin's **Start conductor**
+  action) watches every pane on every PC and suggests what to do next. Its suggestions are cards in a
+  new sidebar section: an answer to a blocked prompt, or a message for an idle agent. Nothing is sent
+  until you tap Approve: an answer goes through the prompt card's route (and goes stale if the screen
+  moved on), a message only lands in that pane's composer as a draft you send yourself. The conductor
+  has a small command line (`scripts/conductor.ts`) and no command that types or presses a key; a new
+  card also sends a web push. Settings → Appearance can hide the section. See the guide's Conductor
+  section.
 - **Settings → Voice input → Dictation language** picks the language dictation listens for. On Auto,
   a browser whose first language the app is not translated into (Hungarian, German, …) is heard in
   that language rather than in English; every other case listens for the app's language as before.

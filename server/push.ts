@@ -91,6 +91,12 @@ export interface PushService {
   /** Schedules the alert this change is worth, and calls off the one it overtakes. */
   onStatus(paneId: string, status: AgentStatus, machineId?: string): Promise<void>;
   onEnded(paneId: string, machineId?: string): Promise<void>;
+  /**
+   * One push that is not a pane status change (the conductor's new suggestion), at once, to the
+   * devices whose alert preferences `wants` accepts. A device that wants no input alerts hears
+   * none. Resolves when every delivery went out or failed (a failure is logged, never thrown).
+   */
+  notify(message: PushPayload, wants: (prefs: AlertPrefs) => boolean): Promise<void>;
   /** Resolves once every alert scheduled so far went out or was called off (tests wait). */
   settled(): Promise<void>;
 }
@@ -426,6 +432,12 @@ export function createPushService(options: PushServiceOptions): PushService {
       if (to.length === 0) return;
       // the pane may already be gone from herdr: the seeded title is what is left
       await broadcast({ ...endedMessage(paneId, titles.get(key) ?? paneId), ...(machineId === "local" ? {} : { machine_id: machineId }), tag: paneNotificationTag(paneId, machineId) }, "normal", to);
+    },
+
+    async notify(message, wants) {
+      const to = [...store().values()].filter((subscription) => wants(subscription.alerts ?? DEFAULT_ALERTS));
+      if (to.length === 0) return;
+      await broadcast(message, "normal", to);
     },
 
     async settled() {
