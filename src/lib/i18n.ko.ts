@@ -8,6 +8,8 @@
 export const KO: Record<string, string> = {
   "Dismiss": "닫기",
   "Waiting for terminal input…": "터미널 입력 준비 중…",
+  "Paused while you use another window": "다른 창을 쓰는 동안 일시 정지됨",
+  "View only while you use another window · click to type": "다른 창을 쓰는 동안 보기 전용 · 클릭하면 입력",
   "Direct typing": "직접 입력",
   "Input line": "입력창",
   "Automatic": "자동",
@@ -77,6 +79,8 @@ export const KO: Record<string, string> = {
   "Increase chat font size": "채팅 글자 크게",
   "Chat font": "채팅 글꼴",
   "Message text; code stays monospace. Comma-separated, tried in order. A font this device does not have falls back to the default.": "메시지 본문에 적용되며 코드는 고정폭 글꼴을 유지합니다. 쉼표로 구분하며 앞에서부터 차례로 사용합니다. 이 기기에 없는 글꼴은 기본 글꼴로 대체합니다.",
+  "Highlight code": "코드 구문 강조",
+  "Colors code by its language. Off, code is plain text.": "코드를 언어에 맞게 색으로 구분합니다. 끄면 코드가 일반 텍스트로 표시됩니다.",
   "Shortcuts": "단축키",
   "Phone": "폰",
   "Devices": "기기",
@@ -105,6 +109,8 @@ export const KO: Record<string, string> = {
   "Background tasks running: {count}": "실행 중인 백그라운드 작업: {count}",
   "INPUT": "입력",
   "DONE": "완료",
+  "BG": "백그라운드",
+  "Agent waiting on background work": "에이전트가 백그라운드 작업을 기다리는 중",
   "—": "—",
   "Agent {status}": "에이전트 {status}",
 
@@ -178,6 +184,8 @@ export const KO: Record<string, string> = {
   "Pane name": "패널 이름",
   "Rename pane": "패널 이름 바꾸기",
   "More for {title}": "{title} 더보기",
+  "Move up": "위로 이동",
+  "Move down": "아래로 이동",
   "Rename workspace": "워크스페이스 이름 바꾸기",
   "Close workspace": "워크스페이스 닫기",
   "New worktree": "새 워크트리",
@@ -459,6 +467,8 @@ export const KO: Record<string, string> = {
   "Copy code": "코드 복사",
   "Show less": "접기",
   "Show all {n} lines": "{n}줄 모두 보기",
+  "Too long to highlight": "너무 길어 강조 표시를 생략했습니다",
+  "Empty task": "빈 할 일",
 
   // ---- composer ----
   "Reconnecting… message held here, never queued": "재연결 중… 메시지는 여기에 보관되고 대기열에 넣지 않습니다",
@@ -525,6 +535,8 @@ export const KO: Record<string, string> = {
   "Last checked {when}": "마지막 확인: {when}",
   "Clipboard from a pane": "패널에서 클립보드로 복사",
   "A program in a pane that copies (vim, tmux, Claude Code) puts its text on this device's clipboard, as a copy you made yourself would. Turn it off if a pane runs output you do not trust: it could replace what you paste next.": "패널에서 복사하는 프로그램(vim, tmux, Claude Code)은 직접 복사한 것과 같이 이 기기의 클립보드에 텍스트를 넣습니다. 믿을 수 없는 출력을 실행하는 패널이 있다면 끄세요. 다음에 붙여 넣을 내용이 바뀔 수 있습니다.",
+  "Use alongside herdr's own window": "터미널의 herdr와 같이 쓰기",
+  "Turn this on if this PC also shows herdr in a terminal window. A second after you switch to another window, this tab only watches the pane, so herdr's window keeps the pane at its own size instead of this window's. Click the tab to type again. While it watches, the pane is drawn at herdr's size and may not fill this window.": "이 PC의 터미널 창에서도 herdr를 띄워 쓴다면 켜세요. 다른 창으로 옮기고 1초가 지나면 이 탭은 패널을 보기만 해서, herdr 창이 패널을 이 창 크기가 아닌 자기 크기로 유지합니다. 다시 입력하려면 탭을 클릭하세요. 보는 동안 패널은 herdr 크기로 그려져 이 창을 다 채우지 않을 수 있습니다.",
   "What should {agent} do in {folder}?": "{folder}에서 {agent}에게 무엇을 맡길까요?",
   "No conversation yet — say something below": "아직 대화가 없습니다. 아래에 말을 걸어 보세요",
   "terminal ended": "터미널 종료됨",

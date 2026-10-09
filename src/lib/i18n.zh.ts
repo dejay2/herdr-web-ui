@@ -12,6 +12,8 @@
 export const ZH: Record<string, string> = {
   "Dismiss": "关闭",
   "Waiting for terminal input…": "正在准备终端输入…",
+  "Paused while you use another window": "使用其他窗口时已暂停",
+  "View only while you use another window · click to type": "使用其他窗口时仅查看 · 点击即可输入",
   "Direct typing": "直接输入",
   "Input line": "输入框",
   "Automatic": "自动",
@@ -81,6 +83,8 @@ export const ZH: Record<string, string> = {
   "Increase chat font size": "增大聊天字号",
   "Chat font": "聊天字体",
   "Message text; code stays monospace. Comma-separated, tried in order. A font this device does not have falls back to the default.": "用于消息正文，代码仍使用等宽字体。以逗号分隔，按顺序使用。此设备上没有的字体会回退到默认字体。",
+  "Highlight code": "代码语法高亮",
+  "Colors code by its language. Off, code is plain text.": "按语言为代码着色。关闭后代码以纯文本显示。",
   "Shortcuts": "快捷键",
   "Phone": "手机",
   "Devices": "设备",
@@ -109,6 +113,8 @@ export const ZH: Record<string, string> = {
   "Background tasks running: {count}": "正在运行的后台任务：{count}",
   "INPUT": "输入",
   "DONE": "完成",
+  "BG": "后台",
+  "Agent waiting on background work": "Agent 正在等待后台工作",
   "—": "—",
   "Agent {status}": "Agent 状态：{status}",
 
@@ -182,6 +188,8 @@ export const ZH: Record<string, string> = {
   "Pane name": "窗格名称",
   "Rename pane": "重命名窗格",
   "More for {title}": "{title} 的更多操作",
+  "Move up": "上移",
+  "Move down": "下移",
   "Rename workspace": "重命名工作区",
   "Close workspace": "关闭工作区",
   "New worktree": "新建工作树",
@@ -463,6 +471,8 @@ export const ZH: Record<string, string> = {
   "Copy code": "复制代码",
   "Show less": "收起",
   "Show all {n} lines": "显示全部 {n} 行",
+  "Too long to highlight": "内容过长，未做语法高亮",
+  "Empty task": "空任务",
 
   // ---- composer ----
   "Reconnecting… message held here, never queued": "正在重连… 消息保留在此处，不会加入队列",
@@ -529,6 +539,8 @@ export const ZH: Record<string, string> = {
   "Last checked {when}": "上次检查：{when}",
   "Clipboard from a pane": "从窗格写入剪贴板",
   "A program in a pane that copies (vim, tmux, Claude Code) puts its text on this device's clipboard, as a copy you made yourself would. Turn it off if a pane runs output you do not trust: it could replace what you paste next.": "窗格中执行复制的程序（vim、tmux、Claude Code）会像你自己复制一样把文本写入此设备的剪贴板。如果窗格运行你不信任的输出，请关闭它：它可能替换你下次粘贴的内容。",
+  "Use alongside herdr's own window": "与终端里的 herdr 一起使用",
+  "Turn this on if this PC also shows herdr in a terminal window. A second after you switch to another window, this tab only watches the pane, so herdr's window keeps the pane at its own size instead of this window's. Click the tab to type again. While it watches, the pane is drawn at herdr's size and may not fill this window.": "如果这台电脑的终端窗口里也开着 herdr，请打开此项。切换到其他窗口一秒后，此标签页只查看窗格，herdr 窗口会按自己的尺寸而不是此窗口的尺寸保留窗格。点击标签页即可再次输入。查看期间窗格按 herdr 的尺寸绘制，可能不会填满此窗口。",
   "What should {agent} do in {folder}?": "要让 {agent} 在 {folder} 做什么？",
   "No conversation yet — say something below": "暂无对话。在下方说点什么吧",
   "terminal ended": "终端已结束",

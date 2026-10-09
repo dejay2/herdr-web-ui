@@ -12,6 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { ArrowUp, FileText, Plus, Square, X } from "lucide-react";
 
 import "./Composer.css";
@@ -35,6 +36,7 @@ import {
   rankSlashCommands,
   terminalOnlyCommand,
 } from "../lib/compose.ts";
+import { paneStatus } from "../lib/status.ts";
 import { modelLabel } from "../lib/modelName.ts";
 import { useFacesArrived } from "../lib/fontFaces.ts";
 import { activeTrigger, applyCompletion, type ActiveTrigger } from "../lib/mentions.ts";
@@ -54,6 +56,8 @@ export interface ComposerProps {
   agentStatus?: AgentStatus;
   /** an OmO pane's running background tasks: the status line opens their list */
   backgroundTasks?: number;
+  /** the pane's turn ended on work still running in the background: its word is BG, not DONE (lib/status.ts paneStatus) */
+  backgroundWait?: boolean;
   metadata?: ConversationMetadata | null;
   /** replaces the placeholder: how a message answers the agent's waiting prompt */
   answerHint?: string | null;
@@ -211,6 +215,7 @@ export function Composer({
   agent,
   agentStatus,
   backgroundTasks = 0,
+  backgroundWait = false,
   metadata,
   answerHint = null,
   suggestion = null,
@@ -257,7 +262,7 @@ export function Composer({
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [files, setFiles] = useState<string[]>([]);
   const [slashUsage, setSlashUsage] = useState<Record<string, number>>(readSlashUsage);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [storedIndex, setSelectedIndex] = useState(0);
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -519,10 +524,9 @@ export function Composer({
   );
   const choices: readonly (SlashCommand | string)[] = trigger?.kind === "slash" ? orderedCommands : files;
   const menuOpen = !menuDismissed && trigger !== null && choices.length > 0;
-
-  useEffect(() => {
-    if (selectedIndex >= choices.length) setSelectedIndex(Math.max(0, choices.length - 1));
-  }, [choices.length, selectedIndex]);
+  // clamped as the list is drawn, not by an effect after it: a Tab or Enter typed before that
+  // effect's render found no row at the old index and did nothing
+  const selectedIndex = Math.min(storedIndex, Math.max(0, choices.length - 1));
 
   // dictation lands at the caret without taking focus (a phone's keyboard stays as it was)
   const dictation = useDictation({
@@ -553,15 +557,17 @@ export function Composer({
     const clampedCaret = Math.min(nextCaret, MAX_COMPOSER_CHARS);
     textRef.current = limitedText;
     caretRef.current = clampedCaret;
-    setText(limitedText);
-    setCaret(clampedCaret);
-    setMenuDismissed(false);
-    requestAnimationFrame(() => {
-      const element = textareaRef.current;
-      if (!element) return;
-      element.selectionStart = element.selectionEnd = clampedCaret;
-      element.focus();
+    // committed now and the caret placed in the same task: a placement deferred to the next frame
+    // would land on whatever was typed or selected meanwhile, behind a key typed right after a completion
+    flushSync(() => {
+      setText(limitedText);
+      setCaret(clampedCaret);
+      setMenuDismissed(false);
     });
+    const element = textareaRef.current;
+    if (!element) return;
+    element.selectionStart = element.selectionEnd = clampedCaret;
+    element.focus();
   }, []);
 
   const insertMentionAtCursor = useCallback(
@@ -711,7 +717,7 @@ export function Composer({
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
           const direction = event.key === "ArrowDown" ? 1 : -1;
-          setSelectedIndex((current) => (current + direction + choices.length) % choices.length);
+          setSelectedIndex((current) => (Math.min(current, choices.length - 1) + direction + choices.length) % choices.length);
           return;
         }
         if (event.key === "Enter" || event.key === "Tab") {
@@ -776,6 +782,8 @@ export function Composer({
   );
 
   const isWorking = agentStatus === "working";
+  // what the status line says; what may be sent, queued or stopped goes by the agent's own status
+  const shownStatus = paneStatus({ agent_status: agentStatus, ...(backgroundWait ? { background_wait: true as const } : {}) });
   const statusCompact = composerStatusCompact(cardWidth);
   const sendShown = composerSendShown({ working: isWorking, text });
   const hint = composerStatusHint({ uploading, connected, text });
@@ -981,19 +989,19 @@ export function Composer({
             <Plus aria-hidden="true" />
           </button>
           {dictation.shown && <MicButton dictation={dictation} />}
-          <BackgroundTasks paneId={paneId} count={backgroundTasks} omo={agent === "omo"} />
+          <BackgroundTasks paneId={paneId} count={backgroundTasks} omo={agent === "omo"} claude={agent === "claude"} />
         </div>
         {/* between the two control groups of the card's last row. The agent's name, its separator and the
             state word are read, not drawn: the mark and the header name the agent, and Stop, the live row and
             the prompt card say the state. All state words stay available to assistive tech only.
             Where the model label does not fit, it steps out and is still read (fitStatus marks data-model) */}
-        <div ref={statusRef} className="composer-status" role="status" data-status={agentStatus ?? "unknown"}
+        <div ref={statusRef} className="composer-status" role="status" data-status={shownStatus}
           data-offline={connected ? undefined : ""} data-hint={hint ?? undefined}>
           {/* everything but the sentence: one row that never wraps, also where the sentence takes a line of its own */}
           <span className="composer-status-meta">
             <span className="composer-agent-label visually-hidden">{agentLabel}</span>
             <span className="composer-status-separator visually-hidden" aria-hidden="true">·</span>
-            <strong className="visually-hidden">{t(composerStatusWord(agentStatus))}</strong>
+            <strong className="visually-hidden">{t(composerStatusWord(shownStatus))}</strong>
             {/* the mark, the model, the level and the context ring as one quiet pill. It only shows: no role,
                 no focus, nothing to press but the ring inside it. A pane that names no model draws no pill
                 (.is-bare): the mark, a level if it has one, and the ring stand in the row as they are */}
