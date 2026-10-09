@@ -875,4 +875,5 @@ export const KO: Record<string, string> = {
   "Done, but the card could not be closed: {error}": "처리했지만 카드를 닫지 못했습니다: {error}",
   "Could not dismiss: {error}": "닫지 못했습니다: {error}",
   "A sidebar list of suggestions from your master agent. It only suggests: nothing is sent until you approve it": "마스터 에이전트의 제안을 사이드바에 보여 줍니다. 제안만 하며, 승인하기 전에는 아무것도 전송되지 않습니다",
+  "Could not mark it outdated: {error}": "오래된 제안으로 표시하지 못했습니다: {error}",
 };

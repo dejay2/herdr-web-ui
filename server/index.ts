@@ -1494,7 +1494,9 @@ export function createServer(
       if (pathname === "/api/conductor" || pathname.startsWith("/api/conductor/")) {
         if (!machines) return jsonResponse({ error: { code: "bridge_only", message: "The conductor runs on the connection server" } }, 404);
         if (!conductorStore) return jsonResponse({ error: { code: "conductor_unavailable", message: conductorUnavailable ?? "The conductor is not available" } }, 503);
-        if (pathname === "/api/conductor/events") bunServer.timeout(request, 40);
+        // a pane read or a post makes two sequential reads of 15 s each (conductorPaneReader), the
+        // long poll waits up to 30 s: 45 s covers both with margin, past Bun's 10 s idle default
+        bunServer.timeout(request, 45);
         return handleConductorRequest(request, url, { store: conductorStore, events: conductorEvents, machines, readPane: conductorPaneReader });
       }
 

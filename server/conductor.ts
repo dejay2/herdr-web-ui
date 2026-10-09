@@ -26,7 +26,7 @@ import {
   type StaleReason,
   type SuggestionStatus,
 } from "../shared/conductor.ts";
-import type { MachineEvent } from "../shared/machines.ts";
+import type { Machine, MachineEvent } from "../shared/machines.ts";
 import { isJsonObject } from "./http.ts";
 
 export class ConductorError extends Error {
@@ -259,11 +259,22 @@ export class ConductorEvents {
   private events: ConductorEvent[] = [];
   private seq = 0;
   private waiters = new Set<() => void>();
+  /** the counter value at each pane's newest event: never repeats, so a change during a read shows */
+  private paneSeqs = new Map<string, number>();
+
+  /** Moves whenever the pane reports a status or ends; 0 for a pane never heard of. */
+  paneSeq(machineId: string, paneId: string): number {
+    return this.paneSeqs.get(JSON.stringify([machineId, paneId])) ?? 0;
+  }
 
   record(machineId: string, paneId: string, agentStatus: string): ConductorEvent {
     this.seq += 1;
     const event: ConductorEvent = { seq: this.seq, machine_id: machineId, pane_id: paneId, agent_status: agentStatus };
     this.events.push(event);
+    const key = JSON.stringify([machineId, paneId]);
+    this.paneSeqs.delete(key);
+    this.paneSeqs.set(key, this.seq);
+    if (this.paneSeqs.size > 10_000) this.paneSeqs.delete(this.paneSeqs.keys().next().value!);
     if (this.events.length > MAX_BUFFERED_EVENTS) this.events.splice(0, this.events.length - MAX_BUFFERED_EVENTS);
     for (const wake of [...this.waiters]) wake();
     return event;
@@ -299,6 +310,28 @@ export class ConductorEvents {
 }
 
 /**
+ * Cards left open across a restart, or across a reconnect that replayed no events, are checked
+ * against the roster of every CONNECTED PC: a pane that is gone, an answer card whose pane is no
+ * longer blocked, a message card whose pane is working. A PC that is not connected is skipped: its
+ * cached roster is no proof of anything.
+ */
+export function reconcileCards(store: ConductorStore, machines: readonly Machine[]): void {
+  for (const machine of machines) {
+    if (machine.state !== "connected" || !machine.snapshot) continue;
+    const status = new Map(machine.snapshot.panes.map((pane) => [pane.pane_id, pane.agent_status]));
+    for (const paneId of new Set(store.list("open").filter((item) => item.machine_id === machine.id).map((item) => item.pane_id))) {
+      const current = status.get(paneId);
+      if (current === undefined) {
+        store.staleWhere(machine.id, paneId, () => true, "pane_ended");
+        continue;
+      }
+      if (current === "idle" || current === "done" || current === "working") store.staleWhere(machine.id, paneId, (item) => item.kind === "answer", "agent_moved_on");
+      if (current === "working") store.staleWhere(machine.id, paneId, (item) => item.kind === "message", "agent_working");
+    }
+  }
+}
+
+/**
  * Feeds the buffer, and calls off the cards a pane has outgrown, from the machine stream
  * MachineManager already keeps (local collector frames and each remote bridge's observer).
  * A card whose pane answered its prompt, or ended, can no longer be acted on; neither can a
@@ -315,6 +348,7 @@ export function followMachines(
       for (const machineId of new Set(store.list("open").map((item) => item.machine_id))) {
         if (!known.has(machineId)) store.staleMachine(machineId, "pc_removed");
       }
+      reconcileCards(store, event.machines);
       return;
     }
     if (event.type !== "machine-message") return;

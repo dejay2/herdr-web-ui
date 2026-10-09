@@ -1,7 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 
 import type { ConductorSuggestion } from "../../shared/conductor.ts";
-import { answerFor, openCount, orderSuggestions, withSuggestedText } from "./conductorCards.ts";
+import { answerFor, forgetInsertedDrafts, insertSuggestedDraft, openCount, orderSuggestions, withSuggestedText } from "./conductorCards.ts";
 
 const card = (over: Partial<ConductorSuggestion>): ConductorSuggestion => ({ id: "a", machine_id: "local", pane_id: "p_1", kind: "message", summary: "s", created_at: "2026-10-09T10:00:00.000Z", status: "open", text: "hi", ...over });
 
@@ -53,5 +53,26 @@ describe("orderSuggestions", () => {
   it("counts only the cards waiting for a tap", () => {
     expect(openCount([card({}), card({ status: "stale" }), card({})])).toBe(2);
     expect(openCount([])).toBe(0);
+  });
+});
+
+describe("insertSuggestedDraft", () => {
+  const drafts = new Map<string, string>();
+  const set = (key: string, update: (draft: string) => string) => { drafts.set(key, update(drafts.get(key) ?? "")); };
+  beforeEach(() => { drafts.clear(); forgetInsertedDrafts(); });
+
+  it("writes the text once per suggestion, however often it is reached", () => {
+    expect(insertSuggestedDraft(set, "k", "s1", "Run the tests.")).toBe(true);
+    expect(insertSuggestedDraft(set, "k", "s1", "Run the tests.")).toBe(false);
+    expect(insertSuggestedDraft(set, "k", "s1", "Run the tests.")).toBe(false);
+    expect(drafts.get("k")).toBe("Run the tests.");
+  });
+
+  it("lets two overlapping approvals of one card add it once, and two cards add both after what was typed", () => {
+    drafts.set("k", "typed already");
+    const overlapping = [insertSuggestedDraft(set, "k", "s1", "First."), insertSuggestedDraft(set, "k", "s1", "First.")];
+    expect(overlapping).toEqual([true, false]);
+    insertSuggestedDraft(set, "k", "s2", "Second.");
+    expect(drafts.get("k")).toBe("typed already\nFirst.\nSecond.");
   });
 });

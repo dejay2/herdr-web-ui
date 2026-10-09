@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { CONDUCTOR_HEADER, type ConductorEvents, type ConductorOverview, type ConductorPane, type ConductorSuggestion } from "../shared/conductor.ts";
 import type { MachineEvent } from "../shared/machines.ts";
 import { herdrRpc, paneSendText, workspaceClose, workspaceCreate } from "./herdr/client.ts";
+import { DeviceStore } from "./devices.ts";
 import { createServer } from "./index.ts";
 
 /**
@@ -91,6 +92,8 @@ describe("conductor routes", () => {
 
 describe("conductor suggestions", () => {
   it("creates, dedupes, approves and persists a message card, and announces it on the machine stream", async () => {
+    // the earlier test left the pane reporting an agent: wait until the roster says it is at rest
+    await until(async () => { const status = ((await (await get("/api/conductor/overview")).json()) as ConductorOverview).machines[0]?.panes.find((pane) => pane.pane_id === paneId)?.agent_status; return status !== undefined && status !== "working" && status !== "blocked"; }, "the pane at rest");
     const events: MachineEvent[] = [];
     const stream = new AbortController();
     const response = await get("/api/machines/events", { signal: stream.signal });
@@ -176,5 +179,54 @@ describe("conductor and the token gate", () => {
     const created = await post("/api/conductor/suggestions", { machine_id: "local", pane_id: paneId, kind: "message", summary: "s", text: "t" }, { ...bearer, [CONDUCTOR_HEADER]: "1" }, root);
     expect(created.status).toBe(201);
     expect(existsSync(join(gatedDir, "conductor-suggestions.json"))).toBe(true);
+  });
+});
+
+describe("conductor and paired devices", () => {
+  it("lets a watch device read the cards and refuses its every change, and refuses a revoked device", async () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-web-ui-conductor-devices-"));
+    const store = new DeviceStore(root);
+    const watch = store.pair(store.startPairing().code, "Watch", "watch")!;
+    const revoked = store.pair(store.startPairing().code, "Gone", "watch")!;
+    const app = createServer({ port: 0, stateDir: root, token: "conductor-devices", tailscaleOwner: null });
+    const origin = `http://127.0.0.1:${app.port}`;
+    const admin = { authorization: "Bearer conductor-devices" };
+    const watcher = { cookie: `herdr_web_device=${watch.token}` };
+    const body = { machine_id: "local", pane_id: paneId, kind: "message", summary: "s", text: "t" };
+    try {
+      await until(async () => ((await (await fetch(`${origin}/api/conductor/overview`, { headers: admin })).json()) as ConductorOverview).machines[0]?.panes.some((pane) => pane.pane_id === paneId), "the roster");
+      const created = (await (await post("/api/conductor/suggestions", body, { ...admin, [CONDUCTOR_HEADER]: "1" }, origin)).json()) as ConductorSuggestion;
+      const file = join(root, "conductor-suggestions.json");
+      const before = readFileSync(file, "utf8");
+
+      const list = await fetch(`${origin}/api/conductor/suggestions`, { headers: watcher });
+      expect(list.status).toBe(200);
+      expect(((await list.json()) as { suggestions: ConductorSuggestion[] }).suggestions.map((card) => card.id)).toEqual([created.id]);
+      expect((await fetch(`${origin}/api/conductor/overview`, { headers: watcher })).status).toBe(200);
+
+      const header = { ...watcher, [CONDUCTOR_HEADER]: "1" };
+      for (const [path, payload] of [
+        ["/api/conductor/suggestions", body],
+        [`/api/conductor/suggestions/${created.id}/approve`, {}],
+        [`/api/conductor/suggestions/${created.id}/dismiss`, {}],
+        [`/api/conductor/suggestions/${created.id}/stale`, { reason: "pane_ended" }],
+      ] as const) {
+        const response = await post(path, payload, header, origin);
+        expect([path, response.status, await errorCode(response)]).toEqual([path, 403, "read_only"]);
+      }
+      expect(readFileSync(file, "utf8")).toBe(before);
+      expect(((JSON.parse(before) as ConductorSuggestion[])[0])!.status).toBe("open");
+
+      // a revoked device is refused everywhere
+      const id = (await (await fetch(`${origin}/api/devices`, { headers: admin })).json() as { devices: { id: string; label: string }[] }).devices.find((device) => device.label === "Gone")!.id;
+      expect((await fetch(`${origin}/api/devices/${id}`, { method: "DELETE", headers: { ...admin, "x-herdr-machine": "1" } })).status).toBe(204);
+      const gone = { cookie: `herdr_web_device=${revoked.token}` };
+      expect((await fetch(`${origin}/api/conductor/suggestions`, { headers: gone })).status).toBe(401);
+      expect((await post("/api/conductor/suggestions", body, { ...gone, [CONDUCTOR_HEADER]: "1" }, origin)).status).toBe(401);
+      expect(readFileSync(file, "utf8")).toBe(before);
+    } finally {
+      app.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

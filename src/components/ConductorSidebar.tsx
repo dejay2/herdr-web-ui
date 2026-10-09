@@ -7,7 +7,7 @@ import { answerPanePrompt, ApiError, closeConductorSuggestion } from "../lib/api
 import type { PaneView } from "../lib/actions.ts";
 import { composerDraftKey, composerDrafts } from "../lib/composerDraft.ts";
 import { useConductorList } from "../lib/conductor.ts";
-import { answerFor, openCount, orderSuggestions, withSuggestedText } from "../lib/conductorCards.ts";
+import { answerFor, insertSuggestedDraft, openCount, orderSuggestions } from "../lib/conductorCards.ts";
 import { type Translate, useT } from "../lib/i18n.ts";
 import { sidebarAgents, paneMark } from "../lib/sidebarAgents.ts";
 import { useSettings } from "../lib/settings.ts";
@@ -86,13 +86,15 @@ function SuggestionCard({ suggestion, machines, selected, onSelect, onChanged }:
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /** this browser learned the prompt changed (a 409), whether or not the server could be told */
+  const [outdated, setOutdated] = useState(false);
   // one request at a time: the state disables the buttons, the ref refuses a second tap before that render
   const inFlight = useRef(false);
   const machine = machines.find((candidate) => candidate.id === suggestion.machine_id);
   const entry = sidebarAgents(machine?.snapshot ?? null).find((candidate) => candidate.pane.pane_id === suggestion.pane_id);
   const pane = machine?.snapshot?.panes.find((candidate) => candidate.pane_id === suggestion.pane_id);
   const title = pane?.label?.trim() || entry?.agent?.title?.trim() || pane?.title?.trim() || (pane ? displayPaneTitle(pane) : suggestion.pane_id);
-  const stale = suggestion.status === "stale";
+  const stale = suggestion.status === "stale" || outdated;
   const online = machine?.state === "connected";
 
   const run = async (work: () => Promise<void>): Promise<void> => {
@@ -113,24 +115,33 @@ function SuggestionCard({ suggestion, machines, selected, onSelect, onChanged }:
       } catch (error) {
         // the screen moved on since the conductor looked: the card says so, nothing was sent
         if (error instanceof ApiError && error.status === 409 && error.code === "prompt_changed") {
-          await closeConductorSuggestion(suggestion.id, "stale", "prompt_changed").catch(() => undefined);
+          // outdated here at once, whether or not the server could be told
+          setOutdated(true);
+          try { await closeConductorSuggestion(suggestion.id, "stale", "prompt_changed"); }
+          catch (staleError) { setNote(t("Could not mark it outdated: {error}", { error: failed(staleError) })); }
           return;
         }
         setNote(t("Could not approve: {error}", { error: failed(error) }));
         return;
       }
-    } else {
-      // never sent from here: the text waits in that pane's composer for the user's own Send
-      const text = suggestion.text ?? "";
-      const key = composerDraftKey(suggestion.machine_id, suggestion.pane_id);
-      composerDrafts.set(key, (draft) => withSuggestedText(draft, text));
-      onSelect(suggestion.machine_id, suggestion.pane_id, "chat");
+      try {
+        await closeConductorSuggestion(suggestion.id, "approve");
+      } catch (error) {
+        setNote(t("Done, but the card could not be closed: {error}", { error: failed(error) }));
+      }
+      return;
     }
+    // A message has no prompt id to gate it, so the server claims the card (open to approved, once)
+    // BEFORE the draft is written: a failed claim writes nothing, and a second tab or tap finds it closed.
     try {
       await closeConductorSuggestion(suggestion.id, "approve");
     } catch (error) {
-      setNote(t("Done, but the card could not be closed: {error}", { error: failed(error) }));
+      setNote(t("Could not approve: {error}", { error: failed(error) }));
+      return;
     }
+    // never sent from here: the text waits in that pane's composer for the user's own Send
+    insertSuggestedDraft((key, update) => composerDrafts.set(key, update), composerDraftKey(suggestion.machine_id, suggestion.pane_id), suggestion.id, suggestion.text ?? "");
+    onSelect(suggestion.machine_id, suggestion.pane_id, "chat");
   });
 
   const dismiss = (): Promise<void> => run(async () => {
@@ -153,7 +164,7 @@ function SuggestionCard({ suggestion, machines, selected, onSelect, onChanged }:
       <p className="conductor-card-detail conductor-card-quote"><span className="conductor-card-label">{t("Draft message")}</span> {suggestion.text}</p>
       {!stale && <p className="conductor-card-hint">{t("Approve puts this in the composer as a draft. You press Send.")}</p>}
     </>}
-    {stale && <p className="conductor-card-stale" role="status">{staleWords(suggestion.stale_reason, t)}</p>}
+    {stale && <p className="conductor-card-stale" role="status">{staleWords(suggestion.status === "stale" ? suggestion.stale_reason : "prompt_changed", t)}</p>}
     {note && <p className="conductor-card-note" role="alert">{note}</p>}
     <div className="conductor-card-actions">
       {!stale && <button type="button" className="btn btn-primary conductor-approve" disabled={busy || !online} onClick={() => void approve()}><Check aria-hidden="true" />{t("Approve")}</button>}

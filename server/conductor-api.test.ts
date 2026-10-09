@@ -7,7 +7,7 @@ import { CONDUCTOR_HEADER, type ConductorPane, type ConductorSuggestion } from "
 import type { Machine } from "../shared/machines.ts";
 import type { HerdrPane, InteractivePrompt } from "../shared/protocol.ts";
 import { ConductorError, ConductorEvents, ConductorStore } from "./conductor.ts";
-import { checkAnswer, handleConductorRequest, reduceTurns, type ConductorDeps } from "./conductor-api.ts";
+import { checkAnswer, handleConductorRequest, paneColumns, reduceTurns, type ConductorDeps } from "./conductor-api.ts";
 
 const pane = (id: string, over: Partial<HerdrPane> = {}): HerdrPane => ({ pane_id: id, agent: "claude", agent_status: "blocked", cwd: "/work/app", label: null, title: "Fix the build", focused: false, revision: 1, tab_id: "t1", terminal_id: "term", workspace_id: "w1", ...over }) as HerdrPane;
 const machine = (id: string, name: string, panes: HerdrPane[], state: Machine["state"] = "connected"): Machine => ({ id, name, kind: id === "local" ? "local" : "ssh", enabled: true, state, error: null, snapshot: { panes } as Machine["snapshot"] });
@@ -20,6 +20,7 @@ let screens: Record<string, string>;
 let prompts: Record<string, InteractivePrompt | null>;
 let conversations: Record<string, unknown>;
 let deps: ConductorDeps;
+let roster: Machine[];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "herdr-conductor-api-"));
@@ -27,11 +28,11 @@ beforeEach(() => {
   screens = {};
   prompts = {};
   conversations = {};
-  const machines = [machine("local", "workstation", [pane("p_1"), pane("p_2", { agent: null, agent_status: "unknown", label: "Shell" })]), machine("pc-2", "laptop", [pane("p_1", { agent: "codex", agent_status: "idle" })], "reconnecting")];
+  roster = [machine("local", "workstation", [pane("p_1"), pane("p_2", { agent: null, agent_status: "unknown", label: "Shell" })]), machine("pc-2", "laptop", [pane("p_1", { agent: "codex", agent_status: "idle" })], "reconnecting")];
   deps = {
     store: new ConductorStore({ stateDir: dir }),
     events: new ConductorEvents(),
-    machines: { list: () => machines },
+    machines: { list: () => roster },
     readPane: async (machineId, path, params) => {
       calls.push({ machineId, path, params });
       const key = `${machineId}/${params["pane_id"]}`;
@@ -167,7 +168,7 @@ describe("events", () => {
 });
 
 describe("suggestions", () => {
-  const messageBody = { machine_id: "local", pane_id: "p_1", kind: "message", summary: "Run the tests", text: "Please run the tests." };
+  const messageBody = { machine_id: "local", pane_id: "p_2", kind: "message", summary: "Run the tests", text: "Please run the tests." };
   const answerBody = { machine_id: "local", pane_id: "p_1", kind: "answer", summary: "Allow the push", prompt_id: "prompt-1", answer: { option_index: 0 } };
 
   it("creates a message card on an existing pane", async () => {
@@ -208,7 +209,7 @@ describe("suggestions", () => {
   it("never takes a card for a pane that asks for a password", async () => {
     prompts["local/p_1"] = prompt();
     for (const asked of ["[sudo] password for jay:", "Enter passphrase for key '/home/jay/.ssh/id_ed25519':"]) {
-      screens["local/p_1"] = `$ sudo ls\n${asked}`;
+      screens["local/p_1"] = screens["local/p_2"] = `$ sudo ls\n${asked}`;
       for (const body of [messageBody, answerBody, { ...answerBody, answer: { custom_text: "hunter2" } }]) {
         const response = await call("POST", "/api/conductor/suggestions", body);
         expect([response.status, (await errorOf(response)).code]).toEqual([422, "secret_prompt"]);
@@ -264,6 +265,79 @@ describe("suggestions", () => {
     await call("POST", "/api/conductor/suggestions", messageBody);
     expect((await json(await call("GET", "/api/conductor/suggestions?status=dismissed"))).suggestions).toEqual([]);
     expect((await call("GET", "/api/conductor/suggestions?status=weird")).status).toBe(400);
+  });
+
+  it("sees a passphrase prompt that wrapped at the pane's width (40 columns)", async () => {
+    const asked = "Enter passphrase for key '/home/jay/.ssh/id_ed25519':";
+    // herdr's screen read keeps the wrap as two rows: the first as wide as the pane
+    screens["local/p_2"] = `$ ssh host\n${asked.slice(0, 40)}\n${asked.slice(40)}`;
+    expect(asked.length).toBeGreaterThan(40);
+    const refused = await call("POST", "/api/conductor/suggestions", messageBody);
+    expect([refused.status, (await errorOf(refused)).code]).toEqual([422, "secret_prompt"]);
+    // the same two rows of ordinary prose are no secret prompt
+    screens["local/p_2"] = "Building the project and then\nrunning the tests";
+    expect((await call("POST", "/api/conductor/suggestions", messageBody)).status).toBe(201);
+  });
+
+  it("measures the width from the read itself", () => {
+    expect(paneColumns("short\nthe longest row  \nmid")).toBe(15);
+    expect(paneColumns("")).toBe(1);
+  });
+
+  it("refuses a card whose pane reported something while it was being read", async () => {
+    const original = deps.readPane;
+    deps.readPane = ((inner) => async (machineId, path, params) => {
+      const answer = await inner(machineId, path, params);
+      if (path === "pane/read") deps.events.record("local", "p_2", "idle");
+      return answer;
+    })(deps.readPane);
+    const refused = await call("POST", "/api/conductor/suggestions", messageBody);
+    expect([refused.status, (await errorOf(refused)).code]).toEqual([409, "pane_changed"]);
+    expect(deps.store.list()).toEqual([]);
+    // an event of another pane, or of the same pane on another PC, does not disturb it
+    deps.readPane = ((inner) => async (machineId, path, params) => {
+      const answer = await inner(machineId, path, params);
+      if (path === "pane/read") { deps.events.record("local", "p_1", "idle"); deps.events.record("pc-2", "p_2", "idle"); }
+      return answer;
+    })(original);
+    expect((await call("POST", "/api/conductor/suggestions", messageBody)).status).toBe(201);
+  });
+
+  it("rechecks the pane's status after the reads: an answer needs it still blocked, a message not busy, and it must exist", async () => {
+    const during = (change: () => void) => {
+      const inner = deps.readPane;
+      deps.readPane = async (machineId, path, params) => { const answer = await inner(machineId, path, params); if (path === "pane/prompt" || path === "pane/read") change(); return answer; };
+    };
+    const set = (paneId: string, status: string) => { roster[0]!.snapshot!.panes.find((entry) => entry.pane_id === paneId)!.agent_status = status; };
+    prompts["local/p_1"] = prompt();
+    during(() => set("p_1", "idle"));
+    const answer = await call("POST", "/api/conductor/suggestions", answerBody);
+    expect([answer.status, (await errorOf(answer)).code]).toEqual([409, "pane_not_blocked"]);
+    deps.readPane = (async (_machineId, path) => path === "pane/read" ? { read: { text: "$ " } } : { prompt: null }) as ConductorDeps["readPane"];
+    during(() => set("p_2", "working"));
+    const message = await call("POST", "/api/conductor/suggestions", messageBody);
+    expect([message.status, (await errorOf(message)).code]).toEqual([409, "pane_busy"]);
+    set("p_2", "unknown");
+    deps.readPane = (async (_machineId, path) => path === "pane/read" ? { read: { text: "$ " } } : { prompt: null }) as ConductorDeps["readPane"];
+    during(() => { roster[0]!.snapshot!.panes = roster[0]!.snapshot!.panes.filter((entry) => entry.pane_id !== "p_2"); });
+    const gone = await call("POST", "/api/conductor/suggestions", messageBody);
+    expect([gone.status, (await errorOf(gone)).code]).toEqual([404, "pane_not_found"]);
+    expect(deps.store.list()).toEqual([]);
+  });
+
+  it("answers a message card for a blocked pane with a clear refusal, and an answer card for an idle one", async () => {
+    const busy = await call("POST", "/api/conductor/suggestions", { ...messageBody, pane_id: "p_1" });
+    expect([busy.status, (await errorOf(busy)).code]).toEqual([409, "pane_busy"]);
+    prompts["pc-2/p_1"] = prompt();
+    const idle = await call("POST", "/api/conductor/suggestions", { ...answerBody, machine_id: "pc-2" });
+    expect([idle.status, (await errorOf(idle)).code]).toEqual([409, "pane_not_blocked"]);
+  });
+
+  it("claims a card once: a second approve, from another tab or a retry, is suggestion_closed", async () => {
+    const created = await json<ConductorSuggestion>(await call("POST", "/api/conductor/suggestions", messageBody));
+    const results = await Promise.all([1, 2, 3].map(() => call("POST", `/api/conductor/suggestions/${created.id}/approve`, {})));
+    expect(results.map((response) => response.status).sort()).toEqual([200, 409, 409]);
+    for (const response of results) if (response.status === 409) expect((await errorOf(response)).code).toBe("suggestion_closed");
   });
 
   it("answers an unknown route with the JSON envelope, and a wrong method plainly", async () => {

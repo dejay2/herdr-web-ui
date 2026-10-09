@@ -158,9 +158,11 @@ async function createSuggestion(deps: ConductorDeps, body: unknown): Promise<Res
   const machines = deps.machines.list();
   const request = parseSuggestionRequest(body, (id) => machines.some((machine) => machine.id === id));
   findPane(machines, request.machine_id, request.pane_id);
+  // moves if the pane reports anything while the reads below are under way
+  const seenSeq = deps.events.paneSeq(request.machine_id, request.pane_id);
   // a password or passphrase prompt is never something an agent may answer or talk over
   const screen = screenOf(await deps.readPane(request.machine_id, "pane/read", { pane_id: request.pane_id, source: "detection", format: "text" }));
-  if (secretPrompt(screen) !== null) throw new ConductorError("secret_prompt", "the pane is asking for a password or passphrase; nothing is suggested for it", 422);
+  if (secretPrompt(screen, paneColumns(screen)) !== null) throw new ConductorError("secret_prompt", "the pane is asking for a password or passphrase; nothing is suggested for it", 422);
   let label: string | undefined;
   if (request.kind === "answer") {
     const prompt = promptOf(await deps.readPane(request.machine_id, "pane/prompt", { pane_id: request.pane_id }));
@@ -168,7 +170,21 @@ async function createSuggestion(deps: ConductorDeps, body: unknown): Promise<Res
     if (prompt.id !== request.prompt_id) throw new ConductorError("prompt_changed", "the pane shows a different prompt now; read it again", 409);
     label = checkAnswer(prompt, request.answer!);
   }
+  // the reads took time: the pane may have moved on since the roster the checks above used
+  if (deps.events.paneSeq(request.machine_id, request.pane_id) !== seenSeq) throw new ConductorError("pane_changed", "the pane changed while it was being read; read it again", 409);
+  const { pane } = findPane(deps.machines.list(), request.machine_id, request.pane_id);
+  if (request.kind === "answer" && pane.agent_status !== "blocked") throw new ConductorError("pane_not_blocked", `the pane is ${pane.agent_status}, not waiting on a prompt`, 409);
+  if (request.kind === "message" && (pane.agent_status === "working" || pane.agent_status === "blocked")) throw new ConductorError("pane_busy", `the pane is ${pane.agent_status}; a message suits an idle or finished agent`, 409);
   return jsonResponse(deps.store.add(request, label), 201);
+}
+
+/**
+ * The pane's width in columns, which joining a wrapped prompt line needs. A read carries no width
+ * and the layout rect is not the terminal's current size (server/AGENTS.md), so it is the longest
+ * row of the read itself: a row that wrapped reached the right edge, and none is longer.
+ */
+export function paneColumns(screen: string): number {
+  return Math.max(1, ...screen.split(/\r?\n/).map((row) => row.trimEnd().length));
 }
 
 async function readJson(request: Request): Promise<unknown> {

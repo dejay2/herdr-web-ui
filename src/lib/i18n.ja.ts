@@ -877,4 +877,5 @@ export const JA: Record<string, string> = {
   "Done, but the card could not be closed: {error}": "実行しましたが、カードを閉じられませんでした: {error}",
   "Could not dismiss: {error}": "閉じられませんでした: {error}",
   "A sidebar list of suggestions from your master agent. It only suggests: nothing is sent until you approve it": "マスターエージェントからの提案をサイドバーに表示します。提案するだけで、承認するまで何も送信されません",
+  "Could not mark it outdated: {error}": "古い提案として記録できませんでした: {error}",
 };

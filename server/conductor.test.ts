@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { MAX_CLOSED_SUGGESTIONS, MAX_MESSAGE_CHARS, MAX_OPEN_SUGGESTIONS, MAX_SUMMARY_CHARS, type SuggestionRequest } from "../shared/conductor.ts";
-import type { MachineEvent } from "../shared/machines.ts";
-import { ConductorError, ConductorEvents, ConductorStore, followMachines, parseAnswer, parseSuggestionRequest } from "./conductor.ts";
+import type { Machine, MachineEvent } from "../shared/machines.ts";
+import { ConductorError, ConductorEvents, ConductorStore, followMachines, parseAnswer, parseSuggestionRequest, reconcileCards } from "./conductor.ts";
 
 const known = (id: string) => id === "local" || id === "pc-2";
 const answerBody = { machine_id: "local", pane_id: "p_1", kind: "answer", summary: "Allow the push", prompt_id: "abc123", answer: { option_index: 0 } };
@@ -308,5 +308,71 @@ describe("followMachines", () => {
     expect(listeners.size).toBe(1);
     stop();
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe("reconcileCards: restart and reconnect recovery", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "herdr-conductor-reconcile-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const machine = (id: string, state: Machine["state"], panes: Record<string, string>): Machine => ({
+    id, name: id, kind: id === "local" ? "local" : "ssh", enabled: true, state, error: null,
+    snapshot: { panes: Object.entries(panes).map(([pane_id, agent_status]) => ({ pane_id, agent_status })) } as unknown as Machine["snapshot"],
+  });
+  const seed = (store: ConductorStore) => {
+    store.add(parseSuggestionRequest({ ...answerBody, pane_id: "a" }, known), "Yes");
+    store.add(parseSuggestionRequest({ ...messageBody, pane_id: "m" }, known));
+    store.add(parseSuggestionRequest({ ...messageBody, pane_id: "gone" }, known));
+    store.add(parseSuggestionRequest({ ...answerBody, pane_id: "a", machine_id: "pc-2" }, known), "Yes");
+  };
+  const states = (store: ConductorStore) => store.list().map((card) => `${card.machine_id}/${card.pane_id}/${card.kind}:${card.status}${card.stale_reason ? `:${card.stale_reason}` : ""}`);
+
+  it("after a restart, calls off what the first connected roster shows has gone by", () => {
+    seed(new ConductorStore({ stateDir: dir }));
+    const restarted = new ConductorStore({ stateDir: dir });
+    expect(restarted.openCount()).toBe(4);
+    const listeners: Array<(event: MachineEvent) => void> = [];
+    followMachines({ subscribe: (listener) => { listeners.push(listener); return () => {}; } }, new ConductorEvents(), restarted);
+    listeners[0]!({ type: "machines", machines: [machine("local", "connected", { a: "idle", m: "working" }), machine("pc-2", "connected", { a: "blocked" })] });
+    expect(states(restarted)).toEqual([
+      "local/a/answer:stale:agent_moved_on", "local/m/message:stale:agent_working", "local/gone/message:stale:pane_ended", "pc-2/a/answer:open",
+    ]);
+  });
+
+  it("keeps a card whose pane is still as it was", () => {
+    const store = new ConductorStore({ stateDir: dir });
+    seed(store);
+    reconcileCards(store, [machine("local", "connected", { a: "blocked", m: "idle", gone: "done" })]);
+    expect(states(store).filter((entry) => entry.startsWith("local")).every((entry) => entry.endsWith(":open"))).toBe(true);
+  });
+
+  it("takes no cached roster of a PC that is not connected for proof of anything", () => {
+    const store = new ConductorStore({ stateDir: dir });
+    seed(store);
+    reconcileCards(store, [machine("local", "reconnecting", {}), machine("pc-2", "disconnected", { a: "idle" })]);
+    expect(store.openCount()).toBe(4);
+    // once the PC reconnects and its roster arrives, the cards are reconciled
+    reconcileCards(store, [machine("local", "connected", { a: "blocked", m: "idle", gone: "done" }), machine("pc-2", "connected", { a: "idle" })]);
+    expect(states(store)).toContain("pc-2/a/answer:stale:agent_moved_on");
+    expect(store.openCount()).toBe(3);
+  });
+
+  it("skips a connected PC whose roster has not loaded", () => {
+    const store = new ConductorStore({ stateDir: dir });
+    seed(store);
+    reconcileCards(store, [{ ...machine("local", "connected", {}), snapshot: null }]);
+    expect(store.openCount()).toBe(4);
+  });
+
+  it("tracks the newest event number of each pane apart per PC", () => {
+    const events = new ConductorEvents();
+    expect(events.paneSeq("local", "p")).toBe(0);
+    events.record("local", "p", "idle");
+    const first = events.paneSeq("local", "p");
+    events.record("pc-2", "p", "idle");
+    expect(events.paneSeq("local", "p")).toBe(first);
+    events.record("local", "p", "working");
+    expect(events.paneSeq("local", "p")).toBeGreaterThan(first);
   });
 });

@@ -25,3 +25,23 @@ export function orderSuggestions(list: readonly ConductorSuggestion[]): Conducto
 export function openCount(list: readonly ConductorSuggestion[]): number {
   return list.filter((suggestion) => suggestion.status === "open").length;
 }
+
+const insertedDrafts = new Set<string>();
+
+/**
+ * Puts a suggested message into a composer draft once per suggestion: a retry, a double tap or a
+ * second render that reaches this again with the same id adds nothing. Returns whether it wrote.
+ * The caller claims the card on the server first (approve must have succeeded), so two tabs never
+ * both get here.
+ */
+export function insertSuggestedDraft(set: (key: string, update: (draft: string) => string) => void, key: string, suggestionId: string, text: string): boolean {
+  if (insertedDrafts.has(suggestionId)) return false;
+  insertedDrafts.add(suggestionId);
+  set(key, (draft) => withSuggestedText(draft, text));
+  return true;
+}
+
+/** For tests: forget which suggestions were inserted. */
+export function forgetInsertedDrafts(): void {
+  insertedDrafts.clear();
+}

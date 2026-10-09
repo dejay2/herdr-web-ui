@@ -879,4 +879,5 @@ export const ZH: Record<string, string> = {
   "Done, but the card could not be closed: {error}": "已执行，但无法关闭卡片：{error}",
   "Could not dismiss: {error}": "无法忽略：{error}",
   "A sidebar list of suggestions from your master agent. It only suggests: nothing is sent until you approve it": "在侧边栏显示主 Agent 的建议。它只提建议，批准之前不会发送任何内容",
+  "Could not mark it outdated: {error}": "无法标记为已过期：{error}",
 };
