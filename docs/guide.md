@@ -290,6 +290,8 @@ Open Settings → Remote PCs and choose **Add PC** (the command palette has it t
 - **A herdr already running there** is never stopped or replaced.
 - **Bridge updates:** when an app update needs a newer bridge, PCs that connect with their saved key are updated in the background.
 
+**From your Tailscale PCs:** if Tailscale runs on the web server's PC, the Add PC dialog lists the other PCs of your tailnet above the address field. Tap an online one to fill in its address and name (edit the address to add a `user@` if your login there differs), then Connect. A PC that is offline cannot be picked, and one already added shows **Added**. Tailscale SSH may print a sign-in link while connecting; the dialog makes it clickable.
+
 More in [remote PCs](remote-pcs.md).
 
 ## Access and safety

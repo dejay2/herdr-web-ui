@@ -74,7 +74,7 @@ import { handleTelemetryRequest, Telemetry } from "./telemetry.ts";
 import { handleUsageRequest, UsageService } from "./usage.ts";
 import { handleVoiceRequest, VoiceService } from "./voice.ts";
 
-import { BRIDGE_PROTOCOL } from "../shared/machines.ts";
+import { BRIDGE_PROTOCOL, type TailscalePeers } from "../shared/machines.ts";
 import { bridgeIdentity, registerBridge } from "./bridge.ts";
 import { bridgeAgentNews, MachineManager } from "./machines.ts";
 import { handleMachineRequest } from "./machine-api.ts";
@@ -338,6 +338,8 @@ export function createServer(
     tailscaleServeOnly?: boolean;
     /** the tailnet identity behind the access check; unset, the tailscale CLI says. Tests pass one with their own status reader. */
     tailnet?: TailnetIdentitySource;
+    /** the tailnet's PCs for the Add PC picker; unset, the tailscale CLI says. Tests pass a fixed answer. */
+    tailscalePeers?: () => Promise<TailscalePeers>;
     /** Native Codex store; defaults to CODEX_HOME. Tests use an isolated store. */
     codexHome?: string;
     /** OpenCode's database; defaults to where OpenCode finds it (OPENCODE_DB, XDG_DATA_HOME). Tests use an isolated store. */
@@ -1360,7 +1362,7 @@ export function createServer(
           // a worktree made with an agent waits on git and then agent.start, up to 150 s on the PC
           bunServer.timeout(request, pathname === "/api/machines/events" ? 0 : pathname.endsWith("/worktree/create") ? 180 : 80);
           const deviceId = access.level === "full" ? access.device?.id : undefined;
-          const response = await handleMachineRequest(request, machines, deviceId ? (close) => devices.onRevoke(deviceId, close) : undefined);
+          const response = await handleMachineRequest(request, machines, deviceId ? (close) => devices.onRevoke(deviceId, close) : undefined, options.tailscalePeers);
           response.headers.set("cache-control", "no-store");
           return response;
         }
