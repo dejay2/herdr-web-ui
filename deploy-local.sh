@@ -1,25 +1,58 @@
 #!/usr/bin/env bash
-# Publish this fork as the locally running herdr-web-ui.
+# Publish this fork as the locally running herdr-web-ui, and keep the app's
+# updater pointed at this fork's GitHub release.
 #
-# Builds the repo, drops the result into the installed bundle directory
-# (which herdr's bridge runs), and restarts the bridge. The official
-# `herdr update` replaces the bundle directory, so re-run this after it.
+# One command does: build, upload the bundle to the fork's GitHub release,
+# write the manifest that makes the app download updates from that release,
+# copy the fresh code into the installed bundle, and restart the bridge
+# (herdr respawns it). Re-run after any change; also re-run if an official
+# herdr update replaces the installed bundle directory.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
-# the installed bundle: remote-vNN-<hash>, with a remote-vNN symlink beside it
+GITHUB_REPO="dejay2/herdr-web-ui"
 BUNDLE_DIR="$(ls -d "$HOME/.local/share/herdr-web-ui"/remote-v*-e* 2>/dev/null | sort | tail -1)"
 BUN="$HOME/.local/share/herdr-web-ui/$(basename "$BUNDLE_DIR")/bin/bun"
 [ -x "$BUN" ] || BUN="$(command -v bun)"
+# the build scripts call `bun` by name for their own steps
+export PATH="$(dirname "$BUN"):$PATH"
+PLATFORM="${1:-linux-x64}"
 
 echo "repo:   $REPO"
 echo "bundle: $BUNDLE_DIR"
-echo "bun:    $BUN"
+echo "platform: $PLATFORM"
 
 cd "$REPO"
 "$BUN" install
 "$BUN" run build
+"$BUN" run build:remote "$PLATFORM"
 
+# --- the GitHub release: the update source the app fetches from ---
+MANIFEST="remote-bundles/manifest-$PLATFORM.json"
+TGZ="remote-bundles/herdr-web-ui-$PLATFORM.tgz"
+VERSION="$(python3 -c "import json; print(json.load(open('$MANIFEST'))['version'])")"
+TAG="remote-v$VERSION"
+gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+  --title "herdr-web-ui $TAG ($GITHUB_REPO)" \
+  --notes "Self-hosted update source for the $GITHUB_REPO fork."
+gh release upload "$TAG" "$TGZ" --clobber
+
+# the running app reads its manifest from <bundle>/remote-bundles/; a
+# GitHub-flavoured copy of the manifest points the downloader at the release
+python3 - "$MANIFEST" "$PLATFORM" "$GITHUB_REPO" "$VERSION" <<'PY'
+import json, sys
+manifest_path, platform, repo, version = sys.argv[1:5]
+m = json.load(open(manifest_path))
+asset = m["assets"][platform]
+asset["url"] = f"https://github.com/{repo}/releases/download/remote-v{version}/herdr-web-ui-{platform}.tgz"
+out = manifest_path.replace(".json", "-github.json")
+json.dump(m, open(out, "w"), indent=2)
+print(open(out).read())
+PY
+
+# --- install into the running app ---
+mkdir -p "$BUNDLE_DIR/remote-bundles"
+cp "remote-bundles/manifest-$PLATFORM-github.json" "$BUNDLE_DIR/remote-bundles/manifest-$PLATFORM.json"
 # code, not the runtime: bin/ and bundle.json stay the official ones
 rsync -a --delete "$REPO/dist/" "$BUNDLE_DIR/dist/"
 rsync -a --delete "$REPO/server/" "$BUNDLE_DIR/server/"
