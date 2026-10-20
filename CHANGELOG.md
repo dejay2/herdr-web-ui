@@ -30,6 +30,9 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   ([#699](https://github.com/devswha/herdr-web-ui/pull/699), [#700](https://github.com/devswha/herdr-web-ui/pull/700))
 
 ### Fixed
+- Adding a Windows PC over SSH no longer fails with "The herdr installer failed" when herdr is
+  already installed: an SSH session cannot follow the junction at `Programs\Herdr\bin`, so herdr.exe
+  is now found through the junction's target, before and after an install.
 - Claude background counts reread concurrent transcript appends and replaced transcript files
   instead of keeping a stale count until another write. ([#701](https://github.com/devswha/herdr-web-ui/pull/701))
 - Claude process identity lookups recover after transient failures, so tasks left by an earlier

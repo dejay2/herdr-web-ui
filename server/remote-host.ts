@@ -136,6 +136,16 @@ const WINDOWS_REGISTRY = "$env:USERPROFILE\\.config\\herdr-web-ui\\bridges";
 // not count as a failure, so the directory is checked first
 const WINDOWS_DESCRIPTORS = `if (Test-Path ${WINDOWS_REGISTRY}) { Get-ChildItem ${WINDOWS_REGISTRY} -Filter *.json | ForEach-Object { Write-Output (Get-Content $_.FullName -Raw) } }; Write-Output ''`;
 
+// herdr's installer keeps a stable alias in %LOCALAPPDATA%\Programs\Herdr\bin, a directory
+// junction to the current release. An SSH session cannot traverse that junction (Test-Path on
+// the herdr.exe behind it is False), but the junction's own Target is readable, so herdr.exe is
+// found through the release directory instead; best effort, the caller's next fallback follows
+const WINDOWS_HERDR_LOOKUP = [
+  "$herdr = \"$env:LOCALAPPDATA\\Programs\\Herdr\\bin\\herdr.exe\"",
+  // Target is a string, or a string array on PowerShell 5.1
+  "if (-not (Test-Path $herdr)) { try { $target = @((Get-Item -Force \"$env:LOCALAPPDATA\\Programs\\Herdr\\bin\" -ErrorAction Stop).Target)[0]; if ($target -and (Test-Path \"$target\\herdr.exe\")) { $herdr = \"$target\\herdr.exe\" } } catch { $target = $null } }",
+].join("\n");
+
 export const windowsHost: RemoteHost = {
   kind: "windows",
   bundleDescription: "Private web bridge bundle (Bun only: herdr owns every terminal on Windows)",
@@ -145,7 +155,7 @@ export const windowsHost: RemoteHost = {
       "$ErrorActionPreference = 'Continue'",
       // herdr's installer keeps a stable alias here (PATH's herdr.exe is one versioned release,
       // which the next update replaces); a fresh sshd session may not have the PATH it added yet
-      "$herdr = \"$env:LOCALAPPDATA\\Programs\\Herdr\\bin\\herdr.exe\"",
+      WINDOWS_HERDR_LOOKUP,
       "if (-not (Test-Path $herdr)) { $herdr = (Get-Command herdr.exe -ErrorAction SilentlyContinue).Source }",
       "Write-Output 'Windows'; Write-Output $env:PROCESSOR_ARCHITECTURE; Write-Output $env:USERPROFILE; Write-Output $env:APPDATA; Write-Output $env:LOCALAPPDATA; Write-Output \"$herdr\"",
       `if (Test-Path "${WINDOWS_BUNDLE}\\bin\\bun.exe") { Write-Output 'bundle-ready' }`,
@@ -242,7 +252,7 @@ export const windowsHost: RemoteHost = {
       "& cmd.exe /d /c \"$tmp\\install.cmd\"; if ($LASTEXITCODE -ne 0) { throw 'The herdr installer failed' }",
       "Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue",
     ].join("\n"), undefined, 10 * 60_000);
-    const herdr = (await ssh.runPowerShell("Write-Output \"$env:LOCALAPPDATA\\Programs\\Herdr\\bin\\herdr.exe\"")).trim();
+    const herdr = (await ssh.runPowerShell(`${WINDOWS_HERDR_LOOKUP}\nWrite-Output "$herdr"`)).trim();
     if (!/^[A-Za-z]:\\/.test(herdr)) throw new Error("herdr's installer left no herdr.exe behind");
     return herdr;
   },

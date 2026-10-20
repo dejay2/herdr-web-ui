@@ -11,7 +11,7 @@ import { handleMachineRequest, MACHINE_PROXY_PATH } from "./machine-api.ts";
 import type { BridgeDescriptor } from "./bridge.ts";
 import { createServer } from "./index.ts";
 import { MachineManager } from "./machines.ts";
-import { detectHost, psQuote, UNSUPPORTED_HOST, windowsBridgeFiles } from "./remote-host.ts";
+import { detectHost, windowsHost, psQuote, UNSUPPORTED_HOST, windowsBridgeFiles } from "./remote-host.ts";
 import { decodeClixml, SshConnection } from "./ssh.ts";
 import { terminalAttachSupported } from "./herdr/client.ts";
 import { attachableIdentity, isRealNode, sidecarAvailable } from "./pty/sidecar.ts";
@@ -318,6 +318,21 @@ describe("host detection", () => {
         runtimeDir: `C:\\Users\\u\\AppData\\Local\\herdr-web-ui\\remote-v${REMOTE_BUNDLE_VERSION}`, bundleReady: false,
       });
     }
+  });
+  it("resolves herdr through its install junction, which an SSH session cannot traverse", async () => {
+    const scripts: string[] = [];
+    const ssh = { runPowerShell: async (script: string) => { scripts.push(script); return script.includes("PROCESSOR_ARCHITECTURE") ? windowsAnswer : "C:\\herdr.exe"; } } as unknown as SshConnection;
+    await windowsHost.inspect(ssh);
+    await windowsHost.installHerdr!(ssh);
+    const inspectScript = scripts[0]!;
+    const resolveScript = scripts[scripts.length - 1]!;
+    for (const script of [inspectScript, resolveScript]) {
+      expect(script).toContain("(Get-Item -Force");
+      expect(script).toContain(".Target");
+      expect(script).toContain("herdr.exe");
+    }
+    // the junction is tried before the PATH lookup
+    expect(inspectScript.indexOf(".Target")).toBeLessThan(inspectScript.indexOf("Get-Command herdr.exe"));
   });
   it("refuses a Windows PC that is not x64, by name", async () => {
     await expect(detectHost(pc("sh: not found", windowsAnswer.replace("AMD64", "ARM64")))).rejects.toThrow(UNSUPPORTED_HOST);
